@@ -1,0 +1,162 @@
+from __future__ import annotations
+
+import re
+import shutil
+import uuid
+from datetime import datetime
+from pathlib import Path
+
+from .config import Settings
+from .exporters import summary_markdown, transcript_markdown, write_outputs
+from .gemini_provider import summarize_transcript_gemini, transcribe_chunks_gemini
+from .media import split_audio
+from .summarization import summarize_transcript
+from .transcription import transcribe_chunks
+from .youtube import download_authorized_audio
+
+
+class PipelineError(RuntimeError):
+    pass
+
+
+def _safe_name(name: str) -> str:
+    cleaned = re.sub(r"[^\w.\- ]+", "_", name, flags=re.UNICODE).strip(" ._")
+    return cleaned[:120] or "media"
+
+
+def _copy_upload(uploaded_path: str, target_dir: Path) -> tuple[Path, str]:
+    source = Path(uploaded_path)
+    if not source.is_file():
+        raise PipelineError("找不到上傳的檔案。")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = target_dir / _safe_name(source.name)
+    shutil.copy2(source, target)
+    return target, source.stem
+
+
+def _safe_cleanup(job_dir: Path, *targets: Path) -> None:
+    job_root = job_dir.resolve()
+    for target in targets:
+        resolved = target.resolve()
+        if resolved == job_root or job_root not in resolved.parents:
+            raise PipelineError("拒絕清除工作目錄以外的路徑。")
+        if resolved.exists():
+            shutil.rmtree(resolved)
+
+
+def run_pipeline(
+    *,
+    settings: Settings,
+    provider: str,
+    uploaded_path: str | None,
+    youtube_url: str,
+    authorized_content: bool,
+    api_key_input: str,
+    transcription_model: str,
+    summary_model: str,
+    gemini_model: str,
+    reasoning_effort: str,
+    language_label: str,
+    glossary: str,
+    summary_style: str,
+    delete_temp: bool,
+    status_callback=None,
+) -> tuple[str, str, list[str], str]:
+    provider_key = provider.strip().lower()
+    if provider_key not in {"gemini", "openai"}:
+        raise PipelineError("不支援的 AI 服務商。")
+    configured_key = (
+        settings.gemini_api_key if provider_key == "gemini" else settings.openai_api_key
+    )
+    api_key = api_key_input.strip() or configured_key
+    if not api_key:
+        environment_name = "GEMINI_API_KEY" if provider_key == "gemini" else "OPENAI_API_KEY"
+        raise PipelineError(
+            f"請在畫面輸入 {provider} API Key，或在 .env 設定 {environment_name}。"
+        )
+    if not uploaded_path and not youtube_url.strip():
+        raise PipelineError("請上傳音檔／影片，或輸入 YouTube 網址。")
+    if uploaded_path and youtube_url.strip():
+        raise PipelineError("請只選擇一種來源：上傳檔案或 YouTube 網址。")
+
+    job_id = f"{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}"
+    job_dir = settings.jobs_dir / job_id
+    source_dir = job_dir / "source"
+    chunks_dir = job_dir / "chunks"
+    output_dir = job_dir / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if status_callback:
+        status_callback("準備來源檔案")
+    if uploaded_path:
+        source_path, source_name = _copy_upload(uploaded_path, source_dir)
+    else:
+        if not authorized_content:
+            raise PipelineError("使用 YouTube 網址前，請確認你擁有內容或已取得處理授權。")
+        source_path, source_name = download_authorized_audio(
+            youtube_url.strip(),
+            source_dir,
+            settings.ytdlp_cookies_file,
+        )
+
+    if status_callback:
+        status_callback("在本機抽取並切割音訊")
+    chunks = split_audio(source_path, chunks_dir, settings.chunk_seconds)
+
+    def on_chunk(index: int, total: int, name: str) -> None:
+        if status_callback:
+            status_callback(f"轉錄音訊 {index}/{total}：{name}")
+
+    if provider_key == "gemini":
+        transcript = transcribe_chunks_gemini(
+            chunks,
+            api_key=api_key,
+            model=gemini_model,
+            language_label=language_label,
+            glossary=glossary,
+            source_name=source_name,
+            progress_callback=on_chunk,
+        )
+    else:
+        transcript = transcribe_chunks(
+            chunks,
+            api_key=api_key,
+            model=transcription_model,
+            language_label=language_label,
+            glossary=glossary,
+            source_name=source_name,
+            progress_callback=on_chunk,
+        )
+
+    if status_callback:
+        status_callback(f"使用 {provider} 產生結構化摘要")
+    if provider_key == "gemini":
+        summary = summarize_transcript_gemini(
+            transcript,
+            api_key=api_key,
+            model=gemini_model,
+            style=summary_style,
+        )
+    else:
+        summary = summarize_transcript(
+            transcript,
+            api_key=api_key,
+            model=summary_model,
+            reasoning_effort=reasoning_effort,
+            style=summary_style,
+        )
+
+    if status_callback:
+        status_callback("寫入本機輸出檔")
+    output_paths = write_outputs(output_dir, transcript, summary)
+
+    if delete_temp:
+        _safe_cleanup(job_dir, source_dir, chunks_dir)
+
+    status = f"完成（{provider}）。結果位於：{output_dir}"
+    return (
+        transcript_markdown(transcript),
+        summary_markdown(summary),
+        [str(path) for path in output_paths],
+        status,
+    )
