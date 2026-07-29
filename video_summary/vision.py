@@ -7,6 +7,7 @@ from google import genai
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
+from .gemini_retry import call_gemini_with_retry
 from .models import SlideInsight
 from .slides import DetectedSlide
 
@@ -42,7 +43,7 @@ def _image_base64(path: Path) -> str:
 def _slide_batches(
     slides: list[DetectedSlide],
     *,
-    maximum_images: int = 6,
+    maximum_images: int = 10,
     maximum_bytes: int = 12 * 1024 * 1024,
 ) -> list[list[DetectedSlide]]:
     batches: list[list[DetectedSlide]] = []
@@ -68,6 +69,7 @@ def _analyze_gemini_batch(
     *,
     model: str,
     slides: list[DetectedSlide],
+    progress_callback=None,
 ) -> SlideVisionBatch:
     inputs: list[dict[str, str]] = [{"type": "text", "text": VISION_PROMPT}]
     for slide in slides:
@@ -84,14 +86,17 @@ def _analyze_gemini_batch(
                 },
             ]
         )
-    interaction = client.interactions.create(
-        model=model,
-        input=inputs,
-        response_format={
-            "type": "text",
-            "mime_type": "application/json",
-            "schema": SlideVisionBatch.model_json_schema(),
-        },
+    interaction = call_gemini_with_retry(
+        lambda: client.interactions.create(
+            model=model,
+            input=inputs,
+            response_format={
+                "type": "text",
+                "mime_type": "application/json",
+                "schema": SlideVisionBatch.model_json_schema(),
+            },
+        ),
+        progress_callback=progress_callback,
     )
     if not interaction.output_text:
         raise RuntimeError("Gemini 沒有回傳投影片分析結果。")
@@ -162,6 +167,7 @@ def analyze_slides(
                 gemini_client,
                 model=gemini_model,
                 slides=batch,
+                progress_callback=progress_callback,
             )
         elif provider_key == "openai":
             parsed = _analyze_openai_batch(

@@ -7,6 +7,7 @@ from pathlib import Path
 from google import genai
 from pydantic import BaseModel, Field
 
+from .gemini_retry import call_gemini_with_retry
 from .media import media_duration
 from .models import SlideInsight, SummaryResult, TranscriptResult, TranscriptSegment
 from .summarization import SUMMARY_STYLE_INSTRUCTIONS, content_for_summary
@@ -43,15 +44,25 @@ def _audio_input(path: Path) -> dict[str, str]:
     }
 
 
-def _interaction_json(client, *, model: str, inputs, schema: type[BaseModel]) -> BaseModel:
-    interaction = client.interactions.create(
-        model=model,
-        input=inputs,
-        response_format={
-            "type": "text",
-            "mime_type": "application/json",
-            "schema": schema.model_json_schema(),
-        },
+def _interaction_json(
+    client,
+    *,
+    model: str,
+    inputs,
+    schema: type[BaseModel],
+    retry_callback=None,
+) -> BaseModel:
+    interaction = call_gemini_with_retry(
+        lambda: client.interactions.create(
+            model=model,
+            input=inputs,
+            response_format={
+                "type": "text",
+                "mime_type": "application/json",
+                "schema": schema.model_json_schema(),
+            },
+        ),
+        progress_callback=retry_callback,
     )
     output_text = getattr(interaction, "output_text", "")
     if not output_text:
@@ -68,6 +79,7 @@ def transcribe_chunks_gemini(
     glossary: str,
     source_name: str,
     progress_callback=None,
+    retry_callback=None,
 ) -> TranscriptResult:
     client = genai.Client(api_key=api_key)
     requested_language = LANGUAGE_CODES.get(language_label)
@@ -110,6 +122,7 @@ def transcribe_chunks_gemini(
                 _audio_input(chunk),
             ],
             schema=GeminiTranscriptResponse,
+            retry_callback=retry_callback,
         )
         assert isinstance(parsed, GeminiTranscriptResponse)
         detected_language = parsed.detected_language or detected_language
@@ -148,6 +161,7 @@ def _gemini_summary_call(
     content: str,
     style: str,
     partial: bool,
+    retry_callback=None,
 ) -> SummaryResult:
     scope = "這是長內容的其中一部分；只整理本段可證實的資訊。" if partial else "整理完整內容。"
     prompt = (
@@ -161,6 +175,7 @@ def _gemini_summary_call(
         model=model,
         inputs=prompt,
         schema=SummaryResult,
+        retry_callback=retry_callback,
     )
     assert isinstance(parsed, SummaryResult)
     return parsed
@@ -174,6 +189,7 @@ def summarize_transcript_gemini(
     style: str,
     slides: list[SlideInsight] | None = None,
     max_batch_chars: int = 100_000,
+    progress_callback=None,
 ) -> SummaryResult:
     client = genai.Client(api_key=api_key)
     content = content_for_summary(transcript, slides)
@@ -184,6 +200,7 @@ def summarize_transcript_gemini(
             content=content,
             style=style,
             partial=False,
+            retry_callback=progress_callback,
         )
 
     batches = [
@@ -197,6 +214,7 @@ def summarize_transcript_gemini(
             content=batch,
             style=style,
             partial=True,
+            retry_callback=progress_callback,
         )
         for batch in batches
     ]
@@ -210,4 +228,5 @@ def summarize_transcript_gemini(
         content=combined,
         style=style,
         partial=False,
+        retry_callback=progress_callback,
     )

@@ -40,6 +40,11 @@
 - 金鑰可每次貼在本機頁面，或複製 `.env.example` 為 `.env` 後填入 `GEMINI_API_KEY`／`OPENAI_API_KEY`。請勿提交 `.env`。
 - 免費層與付費層的限制、資料使用方式及模型供應可能調整，正式處理私人內容前請先確認供應商當下政策。
 
+Gemini 模式預設會將 API 請求間隔控制為 5 秒；若免費層仍回傳暫時性
+`429`，程式會依照 Google 指定的等待秒數自動重試，而不會立即中止整個工作。
+可在 `.env` 用 `GEMINI_MIN_REQUEST_INTERVAL_SECONDS` 調整間隔。若碰到的是
+每日額度而不是每分鐘限制，仍需等待配額重設或在 Google AI Studio 啟用計費。
+
 ## Gemini 模式
 
 預設模型為 `gemini-3.6-flash`，同一模型會依序完成音訊轉錄與摘要。每段 MP3

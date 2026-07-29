@@ -126,6 +126,7 @@ def run_pipeline(
             glossary=glossary,
             source_name=source_name,
             progress_callback=on_chunk,
+            retry_callback=status_callback,
         )
     else:
         transcript = transcribe_chunks(
@@ -159,6 +160,7 @@ def run_pipeline(
             model=gemini_model,
             style=summary_style,
             slides=slide_insights,
+            progress_callback=status_callback,
         )
     else:
         summary = summarize_transcript(
