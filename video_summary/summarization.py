@@ -5,7 +5,7 @@ import json
 from openai import OpenAI
 
 from .exporters import format_timestamp
-from .models import SummaryResult, TranscriptResult
+from .models import SlideInsight, SummaryResult, TranscriptResult
 
 
 SUMMARY_STYLE_INSTRUCTIONS = {
@@ -24,6 +24,23 @@ def transcript_for_prompt(transcript: TranscriptResult) -> str:
     return "\n".join(lines)
 
 
+def content_for_summary(
+    transcript: TranscriptResult,
+    slides: list[SlideInsight] | None = None,
+) -> str:
+    content = f"逐字稿：\n{transcript_for_prompt(transcript)}"
+    if slides:
+        slide_data = json.dumps(
+            [slide.model_dump() for slide in slides],
+            ensure_ascii=False,
+        )
+        content += (
+            "\n\n投影片畫面分析（timestamp 為投影片首次確認出現的秒數）：\n"
+            f"{slide_data}"
+        )
+    return content
+
+
 def _summary_call(
     client: OpenAI,
     *,
@@ -37,6 +54,8 @@ def _summary_call(
     instructions = (
         "你是忠實的繁體中文內容編輯。只能根據逐字稿整理，不可補充逐字稿沒有的事實。"
         "缺少負責人或期限時使用 null。章節 start_time 必須引用逐字稿中已出現的時間。"
+        "若提供投影片分析，必須用它補足逐字稿中依賴畫面才看得懂的文字、數字、圖表與流程；"
+        "遇到投影片和講者說法不一致時，清楚指出差異。"
         f"{SUMMARY_STYLE_INSTRUCTIONS.get(style, SUMMARY_STYLE_INSTRUCTIONS['一般重點摘要'])}{scope}"
     )
     response = client.responses.parse(
@@ -59,10 +78,11 @@ def summarize_transcript(
     model: str,
     reasoning_effort: str,
     style: str,
+    slides: list[SlideInsight] | None = None,
     max_batch_chars: int = 100_000,
 ) -> SummaryResult:
     client = OpenAI(api_key=api_key)
-    content = transcript_for_prompt(transcript)
+    content = content_for_summary(transcript, slides)
     if len(content) <= max_batch_chars:
         return _summary_call(
             client,
@@ -100,4 +120,3 @@ def summarize_transcript(
         style=style,
         partial=False,
     )
-

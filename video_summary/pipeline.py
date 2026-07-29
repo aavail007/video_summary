@@ -10,8 +10,10 @@ from .config import Settings
 from .exporters import summary_markdown, transcript_markdown, write_outputs
 from .gemini_provider import summarize_transcript_gemini, transcribe_chunks_gemini
 from .media import split_audio
+from .slides import extract_unique_slides
 from .summarization import summarize_transcript
 from .transcription import transcribe_chunks
+from .vision import analyze_slides
 from .youtube import download_authorized_audio
 
 
@@ -59,6 +61,7 @@ def run_pipeline(
     language_label: str,
     glossary: str,
     summary_style: str,
+    analyze_presentation: bool,
     delete_temp: bool,
     status_callback=None,
 ) -> tuple[str, str, list[str], str]:
@@ -101,6 +104,13 @@ def run_pipeline(
 
     if status_callback:
         status_callback("在本機抽取並切割音訊")
+    detected_slides = []
+    if analyze_presentation:
+        detected_slides = extract_unique_slides(
+            source_path,
+            output_dir / "slides",
+            progress_callback=status_callback,
+        )
     chunks = split_audio(source_path, chunks_dir, settings.chunk_seconds)
 
     def on_chunk(index: int, total: int, name: str) -> None:
@@ -128,6 +138,18 @@ def run_pipeline(
             progress_callback=on_chunk,
         )
 
+    slide_insights = []
+    if detected_slides:
+        slide_insights = analyze_slides(
+            detected_slides,
+            provider=provider,
+            api_key=api_key,
+            gemini_model=gemini_model,
+            openai_model=summary_model,
+            reasoning_effort=reasoning_effort,
+            progress_callback=status_callback,
+        )
+
     if status_callback:
         status_callback(f"使用 {provider} 產生結構化摘要")
     if provider_key == "gemini":
@@ -136,6 +158,7 @@ def run_pipeline(
             api_key=api_key,
             model=gemini_model,
             style=summary_style,
+            slides=slide_insights,
         )
     else:
         summary = summarize_transcript(
@@ -144,11 +167,17 @@ def run_pipeline(
             model=summary_model,
             reasoning_effort=reasoning_effort,
             style=summary_style,
+            slides=slide_insights,
         )
 
     if status_callback:
         status_callback("寫入本機輸出檔")
-    output_paths = write_outputs(output_dir, transcript, summary)
+    output_paths = write_outputs(
+        output_dir,
+        transcript,
+        summary,
+        slides=slide_insights,
+    )
 
     if delete_temp:
         _safe_cleanup(job_dir, source_dir, chunks_dir)
@@ -156,7 +185,7 @@ def run_pipeline(
     status = f"完成（{provider}）。結果位於：{output_dir}"
     return (
         transcript_markdown(transcript),
-        summary_markdown(summary),
+        summary_markdown(summary, slide_insights),
         [str(path) for path in output_paths],
         status,
     )

@@ -8,8 +8,8 @@ from google import genai
 from pydantic import BaseModel, Field
 
 from .media import media_duration
-from .models import SummaryResult, TranscriptResult, TranscriptSegment
-from .summarization import SUMMARY_STYLE_INSTRUCTIONS, transcript_for_prompt
+from .models import SlideInsight, SummaryResult, TranscriptResult, TranscriptSegment
+from .summarization import SUMMARY_STYLE_INSTRUCTIONS, content_for_summary
 from .transcription import LANGUAGE_CODES
 
 
@@ -154,7 +154,7 @@ def _gemini_summary_call(
         "你是忠實的繁體中文內容編輯。只能根據逐字稿整理，不可補充逐字稿沒有的事實。"
         "缺少負責人或期限時使用 null。章節 start_time 必須引用逐字稿中已出現的時間。"
         f"{SUMMARY_STYLE_INSTRUCTIONS.get(style, SUMMARY_STYLE_INSTRUCTIONS['一般重點摘要'])}"
-        f"{scope}\n\n逐字稿：\n{content}"
+        f"{scope}\n\n內容資料：\n{content}"
     )
     parsed = _interaction_json(
         client,
@@ -172,10 +172,11 @@ def summarize_transcript_gemini(
     api_key: str,
     model: str,
     style: str,
+    slides: list[SlideInsight] | None = None,
     max_batch_chars: int = 100_000,
 ) -> SummaryResult:
     client = genai.Client(api_key=api_key)
-    content = transcript_for_prompt(transcript)
+    content = content_for_summary(transcript, slides)
     if len(content) <= max_batch_chars:
         return _gemini_summary_call(
             client,

@@ -30,6 +30,7 @@ def process(
     reasoning_effort,
     summary_style,
     glossary,
+    analyze_presentation,
     delete_temp,
     progress=gr.Progress(),
 ):
@@ -54,6 +55,7 @@ def process(
             language_label=language,
             glossary=glossary,
             summary_style=summary_style,
+            analyze_presentation=analyze_presentation,
             delete_temp=delete_temp,
             status_callback=update_status,
         )
@@ -93,6 +95,10 @@ def build_app() -> gr.Blocks:
                 authorized_content = gr.Checkbox(
                     label="我擁有此 YouTube 內容，或已取得下載與處理授權",
                     value=False,
+                )
+                analyze_presentation = gr.Checkbox(
+                    label="分析上傳影片中的投影片，並保留確認不同的完整頁面",
+                    value=True,
                 )
             with gr.Column(scale=2):
                 api_key = gr.Textbox(
@@ -139,7 +145,7 @@ def build_app() -> gr.Blocks:
                 label="摘要推理強度",
             )
             delete_temp = gr.Checkbox(
-                label="完成後刪除來源副本與音訊分段",
+                label="完成後刪除來源副本與音訊分段（確認的投影片仍會保留）",
                 value=True,
             )
 
@@ -169,6 +175,7 @@ def build_app() -> gr.Blocks:
                 reasoning_effort,
                 summary_style,
                 glossary,
+                analyze_presentation,
                 delete_temp,
             ],
             outputs=[status, transcript_output, summary_output, files_output],

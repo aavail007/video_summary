@@ -10,6 +10,8 @@
 
 - 上傳音檔或影片，由內建 FFmpeg 自動抽取音軌。
 - 可在同一個畫面切換 Gemini 或 OpenAI，不需修改程式。
+- 上傳影片時可自動辨識換頁，只保留確認不同的完整投影片並搭配逐字稿理解。
+- 偵測用的低解析度畫面只在記憶體中比較，不會每秒產生圖片檔。
 - 長檔以 48 kbps 單聲道 MP3 分段，避免超過 API 單次上傳限制。
 - Gemini 使用多模態模型完成含講者與時間碼的轉錄，再產生結構化摘要。
 - OpenAI 支援 `gpt-4o-transcribe`、mini、講者辨識與 `whisper-1`，摘要使用 Responses API。
@@ -67,10 +69,25 @@ data/jobs/YYYYMMDD-HHMMSS-xxxxxxxx/
    ├─ transcript.srt
    ├─ transcript.json
    ├─ summary.md
-   └─ summary.json
+   ├─ summary.json
+   ├─ slides.json
+   └─ slides/
+      ├─ slide_001_00-00-01.jpg
+      └─ ...
 ```
 
 若勾選「完成後刪除來源副本與音訊分段」，`source` 與 `chunks` 會在成功完成後刪除。
+確認不同的投影片位於 `output/slides`，不會被這個選項刪除；它們也會列在匯出檔案中。
+
+## 投影片辨識
+
+「分析上傳影片中的投影片」只適用於直接上傳的影片檔。程式以記憶體內的低解析度
+畫面判斷是否換頁、等待畫面穩定並排除重複頁面，然後才從原始影片擷取完整解析度
+JPEG。每秒掃描影格不會寫入硬碟。
+
+確認的投影片會送至所選的 Gemini 或 OpenAI 視覺模型，辨識標題、重要文字、數字、
+表格、圖表及流程，再與同一部影片的逐字稿一起產生摘要。YouTube 網址目前仍只下載
+音軌；若需要投影片辨識，請先下載自己有權處理的影片，再上傳影片檔。
 
 ## YouTube 注意事項
 

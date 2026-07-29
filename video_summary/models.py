@@ -42,3 +42,11 @@ class SummaryResult(BaseModel):
     action_items: list[ActionItem] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
 
+
+class SlideInsight(BaseModel):
+    index: int = Field(ge=1)
+    timestamp: float = Field(ge=0)
+    image_file: str
+    title: str = ""
+    visible_text: list[str] = Field(default_factory=list)
+    visual_summary: str = ""

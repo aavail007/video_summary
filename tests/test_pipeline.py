@@ -39,5 +39,6 @@ def test_pipeline_rejects_unknown_provider(tmp_path: Path) -> None:
             language_label="自動偵測",
             glossary="",
             summary_style="一般重點摘要",
+            analyze_presentation=True,
             delete_temp=True,
         )

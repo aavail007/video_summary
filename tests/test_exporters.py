@@ -7,6 +7,7 @@ from video_summary.exporters import (
 from video_summary.models import (
     ActionItem,
     Chapter,
+    SlideInsight,
     SummaryResult,
     TranscriptResult,
     TranscriptSegment,
@@ -50,8 +51,21 @@ def test_summary_markdown() -> None:
         action_items=[ActionItem(task="完成測試", owner="小明", deadline=None)],
         open_questions=["何時上線？"],
     )
-    markdown = summary_markdown(summary)
+    markdown = summary_markdown(
+        summary,
+        slides=[
+            SlideInsight(
+                index=1,
+                timestamp=12.5,
+                image_file="slides/slide_001.jpg",
+                title="測試投影片",
+                visible_text=["畫面文字"],
+                visual_summary="圖表說明",
+            )
+        ],
+    )
     assert "# 摘要標題" in markdown
     assert "採用方案 A" in markdown
     assert "完成測試（小明）" in markdown
-
+    assert "投影片 1｜00:00:12.500" in markdown
+    assert "slides/slide_001.jpg" in markdown

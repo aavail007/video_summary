@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .models import SummaryResult, TranscriptResult
+from .models import SlideInsight, SummaryResult, TranscriptResult
 
 
 def format_timestamp(seconds: float, *, srt: bool = False) -> str:
@@ -43,7 +43,10 @@ def transcript_srt(transcript: TranscriptResult) -> str:
     return "\n\n".join(blocks) + "\n"
 
 
-def summary_markdown(summary: SummaryResult) -> str:
+def summary_markdown(
+    summary: SummaryResult,
+    slides: list[SlideInsight] | None = None,
+) -> str:
     lines = [f"# {summary.title}", "", "## 摘要", "", summary.overview.strip(), ""]
     if summary.key_points:
         lines.extend(["## 重點", ""])
@@ -71,6 +74,24 @@ def summary_markdown(summary: SummaryResult) -> str:
         lines.extend(["## 未決問題", ""])
         lines.extend(f"- {item}" for item in summary.open_questions)
         lines.append("")
+    if slides:
+        lines.extend(["## 投影片內容", ""])
+        for slide in slides:
+            lines.extend(
+                [
+                    f"### 投影片 {slide.index}｜{format_timestamp(slide.timestamp)}",
+                    "",
+                    f"![投影片 {slide.index}]({slide.image_file})",
+                    "",
+                ]
+            )
+            if slide.title:
+                lines.extend([f"**{slide.title}**", ""])
+            if slide.visible_text:
+                lines.extend(f"- {item}" for item in slide.visible_text)
+                lines.append("")
+            if slide.visual_summary:
+                lines.extend([slide.visual_summary, ""])
     return "\n".join(lines).strip() + "\n"
 
 
@@ -78,6 +99,7 @@ def write_outputs(
     output_dir: Path,
     transcript: TranscriptResult,
     summary: SummaryResult,
+    slides: list[SlideInsight] | None = None,
 ) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     files = {
@@ -85,13 +107,24 @@ def write_outputs(
         "transcript.txt": transcript.text + "\n",
         "transcript.srt": transcript_srt(transcript),
         "transcript.json": json.dumps(transcript.model_dump(), ensure_ascii=False, indent=2),
-        "summary.md": summary_markdown(summary),
+        "summary.md": summary_markdown(summary, slides),
         "summary.json": json.dumps(summary.model_dump(), ensure_ascii=False, indent=2),
     }
+    if slides:
+        files["slides.json"] = json.dumps(
+            [slide.model_dump() for slide in slides],
+            ensure_ascii=False,
+            indent=2,
+        )
     paths: list[Path] = []
     for name, content in files.items():
         path = output_dir / name
         path.write_text(content, encoding="utf-8")
         paths.append(path)
+    if slides:
+        paths.extend(
+            output_dir / slide.image_file
+            for slide in slides
+            if (output_dir / slide.image_file).is_file()
+        )
     return paths
-
