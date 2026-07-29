@@ -13,6 +13,7 @@ T = TypeVar("T")
 _RETRY_SECONDS_RE = re.compile(r"retry\s+in\s+([\d.]+)s", re.IGNORECASE)
 _RATE_LOCK = threading.Lock()
 _LAST_REQUEST_STARTED = 0.0
+_MODEL_BLOCKED_UNTIL: dict[str, float] = {}
 
 
 def _minimum_interval() -> float:
@@ -89,3 +90,54 @@ def call_gemini_with_retry(
                 progress_callback(message)
             time.sleep(delay)
     raise RuntimeError("Gemini 重試流程未能完成。")
+
+
+def call_gemini_with_model_fallback(
+    operation: Callable[[str], T],
+    *,
+    primary_model: str,
+    progress_callback=None,
+) -> T:
+    """Try the selected model once, then use a separate model quota on 429."""
+    fallback_model = os.getenv(
+        "GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite"
+    ).strip()
+    if (
+        fallback_model
+        and fallback_model != primary_model
+        and _MODEL_BLOCKED_UNTIL.get(primary_model, 0.0) > time.monotonic()
+    ):
+        return call_gemini_with_retry(
+            lambda: operation(fallback_model),
+            progress_callback=progress_callback,
+        )
+
+    try:
+        _wait_for_rate_slot()
+        return operation(primary_model)
+    except Exception as error:
+        if not _is_rate_limit_error(error):
+            raise
+
+    if not fallback_model or fallback_model == primary_model:
+        return call_gemini_with_retry(
+            lambda: operation(primary_model),
+            progress_callback=progress_callback,
+        )
+
+    cooldown_raw = os.getenv("GEMINI_FALLBACK_COOLDOWN_SECONDS", "600").strip()
+    try:
+        cooldown = max(60.0, float(cooldown_raw))
+    except ValueError:
+        cooldown = 600.0
+    _MODEL_BLOCKED_UNTIL[primary_model] = time.monotonic() + cooldown
+    message = (
+        f"{primary_model} 已達配額限制，自動改用 {fallback_model} 繼續處理"
+    )
+    print(f"[Gemini] {message}", flush=True)
+    if progress_callback:
+        progress_callback(message)
+    return call_gemini_with_retry(
+        lambda: operation(fallback_model),
+        progress_callback=progress_callback,
+    )

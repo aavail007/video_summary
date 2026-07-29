@@ -7,7 +7,7 @@ from google import genai
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-from .gemini_retry import call_gemini_with_retry
+from .gemini_retry import call_gemini_with_model_fallback
 from .models import SlideInsight
 from .slides import DetectedSlide
 
@@ -38,6 +38,15 @@ visual_summary：說明圖表、流程、圖片與各元素之間的關係；純
 
 def _image_base64(path: Path) -> str:
     return base64.b64encode(path.read_bytes()).decode("ascii")
+
+
+def _image_mime_type(path: Path) -> str:
+    return {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+    }.get(path.suffix.lower(), "image/jpeg")
 
 
 def _slide_batches(
@@ -82,13 +91,13 @@ def _analyze_gemini_batch(
                 {
                     "type": "image",
                     "data": _image_base64(slide.path),
-                    "mime_type": "image/jpeg",
+                    "mime_type": _image_mime_type(slide.path),
                 },
             ]
         )
-    interaction = call_gemini_with_retry(
-        lambda: client.interactions.create(
-            model=model,
+    interaction = call_gemini_with_model_fallback(
+        lambda active_model: client.interactions.create(
+            model=active_model,
             input=inputs,
             response_format={
                 "type": "text",
@@ -96,6 +105,7 @@ def _analyze_gemini_batch(
                 "schema": SlideVisionBatch.model_json_schema(),
             },
         ),
+        primary_model=model,
         progress_callback=progress_callback,
     )
     if not interaction.output_text:
@@ -123,7 +133,8 @@ def _analyze_openai_batch(
                 {
                     "type": "input_image",
                     "image_url": (
-                        f"data:image/jpeg;base64,{_image_base64(slide.path)}"
+                        f"data:{_image_mime_type(slide.path)};base64,"
+                        f"{_image_base64(slide.path)}"
                     ),
                     "detail": "high",
                 },

@@ -57,3 +57,24 @@ def test_extraction_writes_only_confirmed_full_resolution_pages(
     assert len(results) == 2
     assert len(list(output_dir.glob("*.jpg"))) == 2
     assert not list(tmp_path.rglob("frame_*.jpg"))
+
+
+def test_imports_existing_images_and_restores_filename_timestamp(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "slide_001_01-02-03.jpg"
+    second = tmp_path / "custom.png"
+    first.write_bytes(b"jpeg")
+    second.write_bytes(b"png")
+
+    results = slides.import_existing_slides(
+        [str(second), str(first), str(first)],
+        tmp_path / "output" / "slides",
+    )
+
+    assert len(results) == 2
+    assert results[0].timestamp == 0.0
+    assert results[1].timestamp == 3723
+    assert results[0].path.suffix == ".png"
+    assert results[1].path.suffix == ".jpg"
+    assert all(result.path.is_file() for result in results)

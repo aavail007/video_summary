@@ -6,7 +6,12 @@ import traceback
 import gradio as gr
 
 from video_summary.config import settings
-from video_summary.pipeline import run_pipeline
+from video_summary.pipeline import (
+    SLIDE_SOURCE_AUTO,
+    SLIDE_SOURCE_EXISTING,
+    SLIDE_SOURCE_OPTIONS,
+    run_pipeline,
+)
 
 
 APP_CSS = """
@@ -30,11 +35,20 @@ def process(
     reasoning_effort,
     summary_style,
     glossary,
-    analyze_presentation,
+    slide_source_mode,
+    existing_slides_folder,
+    existing_slide_images,
     delete_temp,
     progress=gr.Progress(),
 ):
     status_messages: list[str] = []
+
+    def file_paths(value) -> list[str]:
+        if not value:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return list(value)
 
     def update_status(message: str) -> None:
         status_messages.append(message)
@@ -55,7 +69,11 @@ def process(
             language_label=language,
             glossary=glossary,
             summary_style=summary_style,
-            analyze_presentation=analyze_presentation,
+            slide_source_mode=slide_source_mode,
+            existing_slide_paths=(
+                file_paths(existing_slides_folder)
+                + file_paths(existing_slide_images)
+            ),
             delete_temp=delete_temp,
             status_callback=update_status,
         )
@@ -96,9 +114,24 @@ def build_app() -> gr.Blocks:
                     label="我擁有此 YouTube 內容，或已取得下載與處理授權",
                     value=False,
                 )
-                analyze_presentation = gr.Checkbox(
-                    label="分析上傳影片中的投影片，並保留確認不同的完整頁面",
-                    value=True,
+                slide_source_mode = gr.Radio(
+                    SLIDE_SOURCE_OPTIONS,
+                    value=SLIDE_SOURCE_AUTO,
+                    label="投影片來源",
+                )
+                existing_slides_folder = gr.File(
+                    label="選擇舊的 slides 資料夾",
+                    file_count="directory",
+                    file_types=["image"],
+                    type="filepath",
+                    visible=False,
+                )
+                existing_slide_images = gr.File(
+                    label="或一次選擇多張既有投影片圖片",
+                    file_count="multiple",
+                    file_types=["image"],
+                    type="filepath",
+                    visible=False,
                 )
             with gr.Column(scale=2):
                 api_key = gr.Textbox(
@@ -160,6 +193,16 @@ def build_app() -> gr.Blocks:
             with gr.Tab("匯出檔案"):
                 files_output = gr.File(label="下載結果", file_count="multiple")
 
+        def toggle_existing_slide_inputs(mode: str):
+            visible = mode == SLIDE_SOURCE_EXISTING
+            return gr.update(visible=visible), gr.update(visible=visible)
+
+        slide_source_mode.change(
+            toggle_existing_slide_inputs,
+            inputs=[slide_source_mode],
+            outputs=[existing_slides_folder, existing_slide_images],
+        )
+
         run_button.click(
             process,
             inputs=[
@@ -175,7 +218,9 @@ def build_app() -> gr.Blocks:
                 reasoning_effort,
                 summary_style,
                 glossary,
-                analyze_presentation,
+                slide_source_mode,
+                existing_slides_folder,
+                existing_slide_images,
                 delete_temp,
             ],
             outputs=[status, transcript_output, summary_output, files_output],

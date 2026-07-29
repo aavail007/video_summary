@@ -10,7 +10,7 @@ from .config import Settings
 from .exporters import summary_markdown, transcript_markdown, write_outputs
 from .gemini_provider import summarize_transcript_gemini, transcribe_chunks_gemini
 from .media import split_audio
-from .slides import extract_unique_slides
+from .slides import extract_unique_slides, import_existing_slides
 from .summarization import summarize_transcript
 from .transcription import transcribe_chunks
 from .vision import analyze_slides
@@ -19,6 +19,16 @@ from .youtube import download_authorized_audio
 
 class PipelineError(RuntimeError):
     pass
+
+
+SLIDE_SOURCE_AUTO = "自動從影片偵測並擷取"
+SLIDE_SOURCE_EXISTING = "使用之前已擷取的投影片"
+SLIDE_SOURCE_NONE = "不分析投影片，只分析音訊"
+SLIDE_SOURCE_OPTIONS = [
+    SLIDE_SOURCE_AUTO,
+    SLIDE_SOURCE_EXISTING,
+    SLIDE_SOURCE_NONE,
+]
 
 
 def _safe_name(name: str) -> str:
@@ -61,13 +71,16 @@ def run_pipeline(
     language_label: str,
     glossary: str,
     summary_style: str,
-    analyze_presentation: bool,
+    slide_source_mode: str,
+    existing_slide_paths: list[str] | None,
     delete_temp: bool,
     status_callback=None,
 ) -> tuple[str, str, list[str], str]:
     provider_key = provider.strip().lower()
     if provider_key not in {"gemini", "openai"}:
         raise PipelineError("不支援的 AI 服務商。")
+    if slide_source_mode not in SLIDE_SOURCE_OPTIONS:
+        raise PipelineError("不支援的投影片來源模式。")
     configured_key = (
         settings.gemini_api_key if provider_key == "gemini" else settings.openai_api_key
     )
@@ -105,9 +118,15 @@ def run_pipeline(
     if status_callback:
         status_callback("在本機抽取並切割音訊")
     detected_slides = []
-    if analyze_presentation:
+    if slide_source_mode == SLIDE_SOURCE_AUTO:
         detected_slides = extract_unique_slides(
             source_path,
+            output_dir / "slides",
+            progress_callback=status_callback,
+        )
+    elif slide_source_mode == SLIDE_SOURCE_EXISTING:
+        detected_slides = import_existing_slides(
+            existing_slide_paths or [],
             output_dir / "slides",
             progress_callback=status_callback,
         )

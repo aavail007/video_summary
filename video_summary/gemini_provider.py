@@ -7,7 +7,7 @@ from pathlib import Path
 from google import genai
 from pydantic import BaseModel, Field
 
-from .gemini_retry import call_gemini_with_retry
+from .gemini_retry import call_gemini_with_model_fallback
 from .media import media_duration
 from .models import SlideInsight, SummaryResult, TranscriptResult, TranscriptSegment
 from .summarization import SUMMARY_STYLE_INSTRUCTIONS, content_for_summary
@@ -52,9 +52,9 @@ def _interaction_json(
     schema: type[BaseModel],
     retry_callback=None,
 ) -> BaseModel:
-    interaction = call_gemini_with_retry(
-        lambda: client.interactions.create(
-            model=model,
+    interaction = call_gemini_with_model_fallback(
+        lambda active_model: client.interactions.create(
+            model=active_model,
             input=inputs,
             response_format={
                 "type": "text",
@@ -62,6 +62,7 @@ def _interaction_json(
                 "schema": schema.model_json_schema(),
             },
         ),
+        primary_model=model,
         progress_callback=retry_callback,
     )
     output_text = getattr(interaction, "output_text", "")

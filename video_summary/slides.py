@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import subprocess
+import re
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator
@@ -21,6 +23,11 @@ VIDEO_EXTENSIONS = {
     ".webm",
     ".wmv",
 }
+IMAGE_EXTENSIONS = {".jpeg", ".jpg", ".png", ".webp"}
+_SLIDE_TIMESTAMP_RE = re.compile(
+    r"slide_\d+_(?P<hours>\d{2})-(?P<minutes>\d{2})-(?P<seconds>\d{2})",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -32,6 +39,55 @@ class DetectedSlide:
 
 def is_video_file(path: Path) -> bool:
     return path.suffix.lower() in VIDEO_EXTENSIONS
+
+
+def _timestamp_from_slide_name(path: Path, fallback: float) -> float:
+    match = _SLIDE_TIMESTAMP_RE.search(path.stem)
+    if not match:
+        return fallback
+    return (
+        int(match.group("hours")) * 3600
+        + int(match.group("minutes")) * 60
+        + int(match.group("seconds"))
+    )
+
+
+def import_existing_slides(
+    image_paths: Iterable[str | Path],
+    slides_dir: Path,
+    *,
+    max_slides: int = 250,
+    progress_callback=None,
+) -> list[DetectedSlide]:
+    unique_paths: dict[Path, Path] = {}
+    for raw_path in image_paths:
+        source = Path(raw_path)
+        if not source.is_file() or source.suffix.lower() not in IMAGE_EXTENSIONS:
+            continue
+        unique_paths.setdefault(source.resolve(), source)
+
+    sources = sorted(unique_paths.values(), key=lambda item: item.name.lower())
+    if not sources:
+        raise MediaError("找不到可使用的投影片圖片，請選擇 slides 資料夾或多張圖片。")
+    if len(sources) > max_slides:
+        raise MediaError(f"投影片圖片最多支援 {max_slides} 張。")
+
+    slides_dir.mkdir(parents=True, exist_ok=True)
+    slides: list[DetectedSlide] = []
+    for index, source in enumerate(sources, start=1):
+        if progress_callback:
+            progress_callback(f"匯入既有投影片 {index}/{len(sources)}")
+        timestamp = _timestamp_from_slide_name(source, fallback=float(index - 1))
+        minutes, seconds = divmod(round(timestamp), 60)
+        hours, minutes = divmod(minutes, 60)
+        target = slides_dir / (
+            f"slide_{index:03d}_{hours:02d}-{minutes:02d}-{seconds:02d}"
+            f"{source.suffix.lower()}"
+        )
+        if source.resolve() != target.resolve():
+            shutil.copy2(source, target)
+        slides.append(DetectedSlide(index=index, timestamp=timestamp, path=target))
+    return slides
 
 
 def _frame_difference(left: np.ndarray, right: np.ndarray) -> float:

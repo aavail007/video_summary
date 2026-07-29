@@ -37,3 +37,34 @@ def test_does_not_retry_non_rate_limit_errors() -> None:
         gemini_retry.call_gemini_with_retry(
             lambda: (_ for _ in ()).throw(ValueError("invalid request"))
         )
+
+
+def test_switches_to_fallback_model_on_first_rate_limit(monkeypatch) -> None:
+    models: list[str] = []
+    statuses: list[str] = []
+
+    def operation(model: str):
+        models.append(model)
+        if model == "gemini-primary":
+            raise FakeRateLimitError("Error code: 429 - quota exceeded")
+        return "fallback result"
+
+    monkeypatch.setenv("GEMINI_FALLBACK_MODEL", "gemini-fallback")
+
+    result = gemini_retry.call_gemini_with_model_fallback(
+        operation,
+        primary_model="gemini-primary",
+        progress_callback=statuses.append,
+    )
+
+    assert result == "fallback result"
+    assert models == ["gemini-primary", "gemini-fallback"]
+    assert "自動改用 gemini-fallback" in statuses[0]
+
+    second_result = gemini_retry.call_gemini_with_model_fallback(
+        operation,
+        primary_model="gemini-primary",
+    )
+
+    assert second_result == "fallback result"
+    assert models == ["gemini-primary", "gemini-fallback", "gemini-fallback"]
