@@ -6,13 +6,12 @@ from pathlib import Path
 from .models import SlideInsight, SummaryResult, TranscriptResult
 
 
-def format_timestamp(seconds: float, *, srt: bool = False) -> str:
+def format_timestamp(seconds: float) -> str:
     milliseconds = max(0, round(seconds * 1000))
     hours, remainder = divmod(milliseconds, 3_600_000)
     minutes, remainder = divmod(remainder, 60_000)
     secs, millis = divmod(remainder, 1000)
-    separator = "," if srt else "."
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}{separator}{millis:03d}"
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}.{millis:03d}"
 
 
 def transcript_markdown(transcript: TranscriptResult) -> str:
@@ -20,27 +19,10 @@ def transcript_markdown(transcript: TranscriptResult) -> str:
     for segment in transcript.segments:
         speaker = f" **{segment.speaker}**" if segment.speaker else ""
         lines.append(
-            f"`{format_timestamp(segment.start, srt=False)}`{speaker}　{segment.text.strip()}"
+            f"`{format_timestamp(segment.start)}`{speaker}　{segment.text.strip()}"
         )
         lines.append("")
     return "\n".join(lines).strip() + "\n"
-
-
-def transcript_srt(transcript: TranscriptResult) -> str:
-    blocks: list[str] = []
-    for index, segment in enumerate(transcript.segments, start=1):
-        speaker = f"{segment.speaker}: " if segment.speaker else ""
-        blocks.append(
-            "\n".join(
-                [
-                    str(index),
-                    f"{format_timestamp(segment.start, srt=True)} --> "
-                    f"{format_timestamp(max(segment.end, segment.start + 0.1), srt=True)}",
-                    f"{speaker}{segment.text.strip()}",
-                ]
-            )
-        )
-    return "\n\n".join(blocks) + "\n"
 
 
 def summary_markdown(
@@ -105,7 +87,6 @@ def write_outputs(
     files = {
         "transcript.md": transcript_markdown(transcript),
         "transcript.txt": transcript.text + "\n",
-        "transcript.srt": transcript_srt(transcript),
         "transcript.json": json.dumps(transcript.model_dump(), ensure_ascii=False, indent=2),
         "summary.md": summary_markdown(summary, slides),
         "summary.json": json.dumps(summary.model_dump(), ensure_ascii=False, indent=2),

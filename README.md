@@ -16,7 +16,7 @@
 - Gemini 使用多模態模型完成含講者與時間碼的轉錄，再產生結構化摘要。
 - OpenAI 支援 `gpt-4o-transcribe`、mini、講者辨識與 `whisper-1`，摘要使用 Responses API。
 - 摘要格式：一般重點、會議紀錄、課程筆記。
-- 輸出 Markdown、TXT、JSON、SRT。
+- 輸出 Markdown、TXT、JSON。
 - 選配 `yt-dlp`；只應處理自己擁有或已取得授權的內容。
 - 完成後可自動刪除來源副本及音訊分段。
 
@@ -61,7 +61,7 @@ Gemini 模式預設會將 API 請求間隔控制為 5 秒；若免費層仍回�
 - `gpt-4o-transcribe`：一般高品質轉錄。輸出只提供文字，因此時間碼是本機切片級的近似時間。
 - `gpt-4o-mini-transcribe`：偏向成本與速度。
 - `gpt-4o-transcribe-diarize`：提供講者與段落時間碼，適合會議。
-- `whisper-1`：提供段落時間碼，適合輸出 SRT。
+- `whisper-1`：提供段落時間碼，適合需要較精確時間定位的逐字稿。
 
 OpenAI 預設摘要模型為 `gpt-5.6-terra`，可在畫面的進階設定或 `.env` 修改。
 
@@ -76,7 +76,6 @@ data/jobs/YYYYMMDD-HHMMSS-xxxxxxxx/
 └─ output/
    ├─ transcript.md
    ├─ transcript.txt
-   ├─ transcript.srt
    ├─ transcript.json
    ├─ summary.md
    ├─ summary.json

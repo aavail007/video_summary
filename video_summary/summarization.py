@@ -18,7 +18,7 @@ SUMMARY_STYLE_INSTRUCTIONS = {
 def transcript_for_prompt(transcript: TranscriptResult) -> str:
     lines: list[str] = []
     for segment in transcript.segments:
-        timestamp = format_timestamp(segment.start, srt=False)
+        timestamp = format_timestamp(segment.start)
         speaker = f" {segment.speaker}" if segment.speaker else ""
         lines.append(f"[{timestamp}{speaker}] {segment.text.strip()}")
     return "\n".join(lines)
