@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
+from typing import Literal
 
 from google import genai
 from openai import OpenAI
@@ -14,7 +15,13 @@ from .slides import DetectedSlide
 
 class SlideVisionItem(BaseModel):
     index: int = Field(ge=1)
-    is_presentation_slide: bool
+    content_type: Literal[
+        "presentation_slide",
+        "played_video",
+        "speaker_camera",
+        "desktop_or_app",
+        "transition_or_other",
+    ]
     title: str = ""
     visible_text: list[str] = Field(default_factory=list)
     visual_summary: str = ""
@@ -27,8 +34,14 @@ class SlideVisionBatch(BaseModel):
 VISION_PROMPT = """
 你是繁體中文簡報閱讀助手。依照每張圖片前的投影片編號分析簡報畫面。
 只能描述圖片中可見的資訊，不要從常識補充未出現的事實。
-is_presentation_slide：畫面主要內容是簡報、文件、白板或教學圖表時為 true；
-只有講者、攝影畫面、桌面或轉場畫面時為 false。
+content_type 必須從下列類型中選擇：
+- presentation_slide：真正的 PPT／Keynote 簡報頁面，包含標題頁、條列、表格、圖表、流程圖或圖像型投影片。
+- played_video：講者在課程中播放的影片、電影、新聞、廣告、示範錄影或其字幕畫面。
+- speaker_camera：講者、會議或現場攝影畫面。
+- desktop_or_app：桌面、網頁、軟體操作或程式示範，不是簡報頁。
+- transition_or_other：轉場、黑畫面、模糊畫面或其他內容。
+只有 presentation_slide 會被保留。即使播放影片畫面含有字幕、標題、
+圖表或四周有少量 PPT 邊框，只要主要內容是正在播放的影片，必須分類為 played_video。
 title：投影片標題；沒有明確標題時用簡短描述。
 visible_text：忠實抄錄重要文字、數字、表格欄位與圖例，使用繁體中文。
 visual_summary：說明圖表、流程、圖片與各元素之間的關係；純文字頁則簡述版面主旨。
@@ -192,10 +205,12 @@ def analyze_slides(
         analyses.update({item.index: item for item in parsed.slides})
 
     results: list[SlideInsight] = []
+    excluded_count = 0
     for slide in slides:
         item = analyses.get(slide.index)
-        if item is not None and not item.is_presentation_slide:
+        if item is None or item.content_type != "presentation_slide":
             slide.path.unlink(missing_ok=True)
+            excluded_count += 1
             continue
         results.append(
             SlideInsight(
@@ -206,5 +221,10 @@ def analyze_slides(
                 visible_text=item.visible_text if item else [],
                 visual_summary=item.visual_summary if item else "",
             )
+        )
+    if progress_callback:
+        progress_callback(
+            f"投影片篩選完成：保留 {len(results)} 張 PPT，"
+            f"排除 {excluded_count} 張播放影片或非簡報畫面"
         )
     return results

@@ -14,17 +14,23 @@ def test_selects_stable_unique_pages_and_removes_returned_duplicate() -> None:
         (0.0, solid_frame(10)),
         (0.5, solid_frame(10)),
         (1.0, solid_frame(10)),
-        (1.5, solid_frame(220)),
-        (2.0, solid_frame(220)),
+        (1.5, solid_frame(10)),
+        (2.0, solid_frame(10)),
         (2.5, solid_frame(220)),
-        (4.0, solid_frame(10)),
-        (4.5, solid_frame(10)),
+        (3.0, solid_frame(220)),
+        (3.5, solid_frame(220)),
+        (4.0, solid_frame(220)),
+        (4.5, solid_frame(220)),
         (5.0, solid_frame(10)),
+        (5.5, solid_frame(10)),
+        (6.0, solid_frame(10)),
+        (6.5, solid_frame(10)),
+        (7.0, solid_frame(10)),
     ]
 
     timestamps = slides.select_slide_timestamps(frames)
 
-    assert timestamps == [1.0, 2.5]
+    assert timestamps == [2.0, 4.5]
 
 
 def test_extraction_writes_only_confirmed_full_resolution_pages(
@@ -36,9 +42,13 @@ def test_extraction_writes_only_confirmed_full_resolution_pages(
         (0.0, solid_frame(10)),
         (0.5, solid_frame(10)),
         (1.0, solid_frame(10)),
-        (1.5, solid_frame(220)),
-        (2.0, solid_frame(220)),
+        (1.5, solid_frame(10)),
+        (2.0, solid_frame(10)),
         (2.5, solid_frame(220)),
+        (3.0, solid_frame(220)),
+        (3.5, solid_frame(220)),
+        (4.0, solid_frame(220)),
+        (4.5, solid_frame(220)),
     ]
     monkeypatch.setattr(
         slides,

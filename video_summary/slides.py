@@ -100,8 +100,8 @@ def select_slide_timestamps(
     *,
     change_threshold: float = 0.035,
     stability_threshold: float = 0.012,
-    stable_samples: int = 2,
-    minimum_interval: float = 1.5,
+    stable_samples: int = 4,
+    minimum_interval: float = 2.0,
     max_slides: int = 250,
 ) -> list[float]:
     """Select stable, visually distinct pages without writing scan frames to disk."""

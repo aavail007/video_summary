@@ -18,7 +18,7 @@ class FakeInteractions:
                     "slides": [
                         {
                             "index": 1,
-                            "is_presentation_slide": True,
+                            "content_type": "presentation_slide",
                             "title": "架構圖",
                             "visible_text": ["輸入", "輸出"],
                             "visual_summary": "資料由輸入流向輸出。",
@@ -57,3 +57,57 @@ def test_gemini_slide_analysis_uses_inline_image_and_known_metadata(
     sent_image = interactions.calls[0]["input"][2]
     assert sent_image["type"] == "image"
     assert sent_image["mime_type"] == "image/jpeg"
+
+
+def test_played_video_frames_are_removed(tmp_path: Path, monkeypatch) -> None:
+    slide_image = tmp_path / "slide.jpg"
+    video_image = tmp_path / "video.jpg"
+    slide_image.write_bytes(b"slide")
+    video_image.write_bytes(b"video")
+
+    class MixedInteractions:
+        def create(self, **kwargs):
+            return SimpleNamespace(
+                output_text=json.dumps(
+                    {
+                        "slides": [
+                            {
+                                "index": 1,
+                                "content_type": "presentation_slide",
+                                "title": "PPT",
+                                "visible_text": [],
+                                "visual_summary": "簡報頁",
+                            },
+                            {
+                                "index": 2,
+                                "content_type": "played_video",
+                                "title": "",
+                                "visible_text": [],
+                                "visual_summary": "講者播放的影片",
+                            },
+                        ]
+                    }
+                )
+            )
+
+    monkeypatch.setattr(
+        vision.genai,
+        "Client",
+        lambda **kwargs: SimpleNamespace(interactions=MixedInteractions()),
+    )
+
+    result = vision.analyze_slides(
+        [
+            DetectedSlide(index=1, timestamp=1, path=slide_image),
+            DetectedSlide(index=2, timestamp=2, path=video_image),
+        ],
+        provider="Gemini",
+        api_key="test-key",
+        gemini_model="gemini-test",
+        openai_model="openai-test",
+        reasoning_effort="low",
+    )
+
+    assert [item.index for item in result] == [1]
+    assert slide_image.is_file()
+    assert not video_image.exists()
