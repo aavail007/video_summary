@@ -184,7 +184,7 @@ def build_app() -> gr.Blocks:
                 )
             slide_source_mode = gr.Radio(
                 SLIDE_SOURCE_OPTIONS,
-                value=SLIDE_SOURCE_AUTO,
+                value=SLIDE_SOURCE_NONE,
                 label="投影片來源",
             )
             existing_slides_folder = gr.File(
@@ -298,12 +298,12 @@ def build_app() -> gr.Blocks:
             if SLIDE_SOURCE_AUTO in available:
                 return list(SLIDE_SOURCE_OPTIONS)
             return [
+                SLIDE_SOURCE_NONE,
+                SLIDE_SOURCE_EXISTING,
                 (
                     f"🔒 {SLIDE_SOURCE_AUTO}（目前來源不可使用）",
                     SLIDE_SOURCE_AUTO,
                 ),
-                SLIDE_SOURCE_EXISTING,
-                SLIDE_SOURCE_NONE,
             ]
 
         def source_control_updates(
@@ -364,16 +364,11 @@ def build_app() -> gr.Blocks:
             upload_path,
             url: str,
         ):
-            default_mode = (
-                SLIDE_SOURCE_AUTO
-                if selected_source == SOURCE_UPLOAD
-                else SLIDE_SOURCE_NONE
-            )
             slide_updates = source_control_updates(
                 selected_source,
                 upload_path,
                 url,
-                default_mode,
+                SLIDE_SOURCE_NONE,
             )
             return (
                 gr.update(visible=selected_source == SOURCE_UPLOAD),

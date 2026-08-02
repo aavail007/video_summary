@@ -7,6 +7,7 @@ from video_summary.pipeline import (
     SLIDE_SOURCE_AUTO,
     SLIDE_SOURCE_EXISTING,
     SLIDE_SOURCE_NONE,
+    SLIDE_SOURCE_OPTIONS,
     PipelineError,
     _safe_cleanup,
     _safe_name,
@@ -35,7 +36,7 @@ def test_youtube_url_disables_automatic_slide_extraction() -> None:
         "https://www.youtube.com/watch?v=test",
     )
 
-    assert options == [SLIDE_SOURCE_EXISTING, SLIDE_SOURCE_NONE]
+    assert options == [SLIDE_SOURCE_NONE, SLIDE_SOURCE_EXISTING]
     assert (
         normalize_slide_source_mode(None, "https://youtu.be/test", SLIDE_SOURCE_AUTO)
         == SLIDE_SOURCE_NONE
@@ -54,10 +55,18 @@ def test_empty_youtube_value_accepts_none() -> None:
     assert SLIDE_SOURCE_AUTO in available_slide_source_options(None, None)
 
 
+def test_slide_source_order_starts_with_audio_only() -> None:
+    assert SLIDE_SOURCE_OPTIONS == [
+        SLIDE_SOURCE_NONE,
+        SLIDE_SOURCE_EXISTING,
+        SLIDE_SOURCE_AUTO,
+    ]
+
+
 def test_audio_upload_disables_automatic_slide_extraction() -> None:
     assert available_slide_source_options("lecture.mp3", "") == [
-        SLIDE_SOURCE_EXISTING,
         SLIDE_SOURCE_NONE,
+        SLIDE_SOURCE_EXISTING,
     ]
     assert (
         normalize_slide_source_mode("lecture.mp3", "", SLIDE_SOURCE_AUTO)

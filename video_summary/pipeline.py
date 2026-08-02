@@ -25,9 +25,9 @@ SLIDE_SOURCE_AUTO = "自動從影片偵測並擷取"
 SLIDE_SOURCE_EXISTING = "使用之前已擷取的投影片"
 SLIDE_SOURCE_NONE = "不分析投影片，只分析音訊"
 SLIDE_SOURCE_OPTIONS = [
-    SLIDE_SOURCE_AUTO,
-    SLIDE_SOURCE_EXISTING,
     SLIDE_SOURCE_NONE,
+    SLIDE_SOURCE_EXISTING,
+    SLIDE_SOURCE_AUTO,
 ]
 
 
@@ -37,9 +37,9 @@ def available_slide_source_options(
 ) -> list[str]:
     """Return slide modes that can work with the currently selected media source."""
     if (youtube_url or "").strip():
-        return [SLIDE_SOURCE_EXISTING, SLIDE_SOURCE_NONE]
+        return [SLIDE_SOURCE_NONE, SLIDE_SOURCE_EXISTING]
     if uploaded_path and not is_video_file(Path(uploaded_path)):
-        return [SLIDE_SOURCE_EXISTING, SLIDE_SOURCE_NONE]
+        return [SLIDE_SOURCE_NONE, SLIDE_SOURCE_EXISTING]
     return list(SLIDE_SOURCE_OPTIONS)
 
 
