@@ -42,6 +42,27 @@ def media_duration(path: Path) -> float:
     )
 
 
+def has_video_stream(path: Path) -> bool:
+    """Return whether FFmpeg can decode at least one frame from a video stream."""
+    command = [
+        ffmpeg_executable(),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(path),
+        "-map",
+        "0:v:0",
+        "-frames:v",
+        "1",
+        "-f",
+        "null",
+        os.devnull,
+    ]
+    process = subprocess.run(command, capture_output=True, text=True, check=False)
+    return process.returncode == 0
+
+
 def split_audio(
     source: Path,
     chunks_dir: Path,
@@ -84,4 +105,3 @@ def split_audio(
     if oversized:
         raise MediaError(f"分段後仍超過 25 MB：{', '.join(oversized)}")
     return chunks
-

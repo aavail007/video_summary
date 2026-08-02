@@ -9,7 +9,7 @@ from typing import Iterable, Iterator
 
 import numpy as np
 
-from .media import MediaError, ffmpeg_executable
+from .media import MediaError, ffmpeg_executable, has_video_stream
 
 
 VIDEO_EXTENSIONS = {
@@ -232,6 +232,10 @@ def extract_unique_slides(
 ) -> list[DetectedSlide]:
     """Keep only confirmed pages; sampled detection frames stay in memory."""
     if not is_video_file(source):
+        return []
+    if not has_video_stream(source):
+        if progress_callback:
+            progress_callback("來源只有音訊，略過投影片擷取並繼續處理")
         return []
 
     if progress_callback:

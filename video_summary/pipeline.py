@@ -10,7 +10,7 @@ from .config import Settings
 from .exporters import summary_markdown, transcript_markdown, write_outputs
 from .gemini_provider import summarize_transcript_gemini, transcribe_chunks_gemini
 from .media import split_audio
-from .slides import extract_unique_slides, import_existing_slides
+from .slides import extract_unique_slides, import_existing_slides, is_video_file
 from .summarization import summarize_transcript
 from .transcription import transcribe_chunks
 from .vision import analyze_slides
@@ -29,6 +29,27 @@ SLIDE_SOURCE_OPTIONS = [
     SLIDE_SOURCE_EXISTING,
     SLIDE_SOURCE_NONE,
 ]
+
+
+def available_slide_source_options(
+    uploaded_path: str | None,
+    youtube_url: str,
+) -> list[str]:
+    """Return slide modes that can work with the currently selected media source."""
+    if youtube_url.strip():
+        return [SLIDE_SOURCE_EXISTING, SLIDE_SOURCE_NONE]
+    if uploaded_path and not is_video_file(Path(uploaded_path)):
+        return [SLIDE_SOURCE_EXISTING, SLIDE_SOURCE_NONE]
+    return list(SLIDE_SOURCE_OPTIONS)
+
+
+def normalize_slide_source_mode(
+    uploaded_path: str | None,
+    youtube_url: str,
+    selected_mode: str,
+) -> str:
+    options = available_slide_source_options(uploaded_path, youtube_url)
+    return selected_mode if selected_mode in options else SLIDE_SOURCE_NONE
 
 
 def _safe_name(name: str) -> str:
@@ -62,7 +83,6 @@ def run_pipeline(
     provider: str,
     uploaded_path: str | None,
     youtube_url: str,
-    authorized_content: bool,
     api_key_input: str,
     transcription_model: str,
     summary_model: str,
@@ -94,6 +114,11 @@ def run_pipeline(
         raise PipelineError("請上傳音檔／影片，或輸入 YouTube 網址。")
     if uploaded_path and youtube_url.strip():
         raise PipelineError("請只選擇一種來源：上傳檔案或 YouTube 網址。")
+    slide_source_mode = normalize_slide_source_mode(
+        uploaded_path,
+        youtube_url,
+        slide_source_mode,
+    )
 
     job_id = f"{datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:8]}"
     job_dir = settings.jobs_dir / job_id
@@ -107,8 +132,6 @@ def run_pipeline(
     if uploaded_path:
         source_path, source_name = _copy_upload(uploaded_path, source_dir)
     else:
-        if not authorized_content:
-            raise PipelineError("使用 YouTube 網址前，請確認你擁有內容或已取得處理授權。")
         source_path, source_name = download_authorized_audio(
             youtube_url.strip(),
             source_dir,

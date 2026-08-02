@@ -10,6 +10,8 @@ from video_summary.pipeline import (
     SLIDE_SOURCE_AUTO,
     SLIDE_SOURCE_EXISTING,
     SLIDE_SOURCE_OPTIONS,
+    available_slide_source_options,
+    normalize_slide_source_mode,
     run_pipeline,
 )
 
@@ -26,7 +28,6 @@ def process(
     provider,
     uploaded_file,
     youtube_url,
-    authorized_content,
     api_key,
     language,
     transcription_model,
@@ -60,7 +61,6 @@ def process(
             provider=provider,
             uploaded_path=uploaded_file,
             youtube_url=youtube_url,
-            authorized_content=authorized_content,
             api_key_input=api_key,
             transcription_model=transcription_model,
             summary_model=summary_model.strip(),
@@ -110,9 +110,10 @@ def build_app() -> gr.Blocks:
                     label="或貼上 YouTube 網址",
                     placeholder="https://www.youtube.com/watch?v=...",
                 )
-                authorized_content = gr.Checkbox(
-                    label="我擁有此 YouTube 內容，或已取得下載與處理授權",
-                    value=False,
+                gr.Markdown(
+                    "⚠️ 使用 YouTube URL 時只會下載音訊並產生逐字稿與摘要，"
+                    "無法從影片擷取投影片截圖。若要搭配簡報內容，請選擇既有投影片，"
+                    "或下載完整影片後改用上傳。"
                 )
                 slide_source_mode = gr.Radio(
                     SLIDE_SOURCE_OPTIONS,
@@ -197,10 +198,75 @@ def build_app() -> gr.Blocks:
             visible = mode == SLIDE_SOURCE_EXISTING
             return gr.update(visible=visible), gr.update(visible=visible)
 
+        def source_control_updates(upload_path, url: str, current_mode: str):
+            options = available_slide_source_options(upload_path, url or "")
+            mode = normalize_slide_source_mode(upload_path, url or "", current_mode)
+            visible = mode == SLIDE_SOURCE_EXISTING
+            return (
+                gr.update(choices=options, value=mode),
+                gr.update(visible=visible),
+                gr.update(visible=visible),
+            )
+
+        def use_youtube_source(url: str, upload_path, current_mode: str):
+            has_url = bool((url or "").strip())
+            effective_upload = None if has_url else upload_path
+            slide_updates = source_control_updates(
+                effective_upload,
+                url or "",
+                current_mode,
+            )
+            upload_update = gr.update(value=None) if has_url else gr.update()
+            return (upload_update, *slide_updates)
+
+        def use_uploaded_source(upload_path, url: str, current_mode: str):
+            has_upload = bool(upload_path)
+            effective_url = "" if has_upload else (url or "")
+            slide_updates = source_control_updates(
+                upload_path,
+                effective_url,
+                current_mode,
+            )
+            url_update = gr.update(value="") if has_upload else gr.update()
+            return (url_update, *slide_updates)
+
         slide_source_mode.change(
             toggle_existing_slide_inputs,
             inputs=[slide_source_mode],
             outputs=[existing_slides_folder, existing_slide_images],
+        )
+
+        youtube_url.input(
+            use_youtube_source,
+            inputs=[youtube_url, uploaded_file, slide_source_mode],
+            outputs=[
+                uploaded_file,
+                slide_source_mode,
+                existing_slides_folder,
+                existing_slide_images,
+            ],
+        )
+
+        uploaded_file.upload(
+            use_uploaded_source,
+            inputs=[uploaded_file, youtube_url, slide_source_mode],
+            outputs=[
+                youtube_url,
+                slide_source_mode,
+                existing_slides_folder,
+                existing_slide_images,
+            ],
+        )
+
+        uploaded_file.clear(
+            use_uploaded_source,
+            inputs=[uploaded_file, youtube_url, slide_source_mode],
+            outputs=[
+                youtube_url,
+                slide_source_mode,
+                existing_slides_folder,
+                existing_slide_images,
+            ],
         )
 
         run_button.click(
@@ -209,7 +275,6 @@ def build_app() -> gr.Blocks:
                 provider,
                 uploaded_file,
                 youtube_url,
-                authorized_content,
                 api_key,
                 language,
                 transcription_model,

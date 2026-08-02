@@ -3,7 +3,7 @@ import struct
 import wave
 from pathlib import Path
 
-from video_summary.media import media_duration, split_audio
+from video_summary.media import has_video_stream, media_duration, split_audio
 
 
 def _write_tone(path: Path, duration_seconds: float = 2.0) -> None:
@@ -23,6 +23,8 @@ def _write_tone(path: Path, duration_seconds: float = 2.0) -> None:
 def test_ffmpeg_can_split_local_audio(tmp_path: Path) -> None:
     source = tmp_path / "tone.wav"
     _write_tone(source)
+
+    assert has_video_stream(source) is False
 
     chunks = split_audio(source, tmp_path / "chunks", chunk_seconds=1)
 
