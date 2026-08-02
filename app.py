@@ -22,10 +22,48 @@ APP_CSS = """
 .hero { padding: 1.2rem 0 .4rem; }
 .hero h1 { margin-bottom: .25rem; }
 .hint { color: var(--body-text-color-subdued); }
+
+#upload-source-shell {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.upload-card {
+  border: 1px solid color-mix(in srgb, var(--primary-500) 32%, var(--border-color-primary)) !important;
+  border-radius: 0 !important;
+  background:
+    radial-gradient(circle at 12% 12%, color-mix(in srgb, var(--primary-500) 11%, transparent), transparent 42%),
+    linear-gradient(145deg, var(--block-background-fill), var(--background-fill-secondary)) !important;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.07) !important;
+  overflow: hidden;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
+}
+
+.upload-card:hover,
+.upload-card:focus-within {
+  border-color: var(--primary-500) !important;
+  box-shadow: 0 14px 34px color-mix(in srgb, var(--primary-500) 17%, transparent) !important;
+  transform: translateY(-1px);
+}
+
+.upload-card svg {
+  color: var(--primary-500) !important;
+}
+
+.dark .upload-card {
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.24) !important;
+}
 """
+
+SOURCE_UPLOAD = "上傳影片或音檔"
+SOURCE_YOUTUBE = "YouTube 網址"
+SOURCE_OPTIONS = [SOURCE_UPLOAD, SOURCE_YOUTUBE]
 
 
 def process(
+    source_type,
     provider,
     uploaded_file,
     youtube_url,
@@ -57,6 +95,13 @@ def process(
         progress((len(status_messages) % 10) / 10, desc=message)
 
     try:
+        if source_type == SOURCE_UPLOAD:
+            youtube_url = ""
+        elif source_type == SOURCE_YOUTUBE:
+            uploaded_file = None
+        else:
+            raise ValueError("不支援的影音來源。")
+
         transcript, summary, files, status = run_pipeline(
             settings=settings,
             provider=provider,
@@ -95,52 +140,70 @@ def build_app() -> gr.Blocks:
             """
         )
 
-        with gr.Row():
-            with gr.Column(scale=3):
+        with gr.Group():
+            gr.Markdown("### 1. 選擇影音來源")
+            source_type = gr.Radio(
+                SOURCE_OPTIONS,
+                value=SOURCE_UPLOAD,
+                label="影音來源",
+            )
+            with gr.Column(
+                visible=True,
+                elem_id="upload-source-shell",
+            ) as upload_source_group:
+                uploaded_file = gr.File(
+                    label="上傳影片或音檔",
+                    type="filepath",
+                    file_types=["audio", "video"],
+                    elem_id="media-upload",
+                    elem_classes=["upload-card"],
+                )
+            with gr.Column(visible=False) as youtube_source_group:
+                youtube_url = gr.Textbox(
+                    label="貼上 YouTube 網址",
+                    placeholder="https://www.youtube.com/watch?v=...",
+                )
+                gr.Markdown(
+                    "⚠️ YouTube 網址只會下載音訊並產生逐字稿與摘要，"
+                    "無法從影片擷取投影片截圖。若要搭配簡報內容，可選擇既有投影片，"
+                    "或下載完整影片後改用上傳。"
+                )
+            slide_source_mode = gr.Radio(
+                SLIDE_SOURCE_OPTIONS,
+                value=SLIDE_SOURCE_AUTO,
+                label="投影片來源",
+            )
+            existing_slides_folder = gr.File(
+                label="選擇舊的 slides 資料夾",
+                file_count="directory",
+                file_types=["image"],
+                type="filepath",
+                visible=False,
+                elem_classes=["upload-card"],
+            )
+            existing_slide_images = gr.File(
+                label="或一次選擇多張既有投影片圖片",
+                file_count="multiple",
+                file_types=["image"],
+                type="filepath",
+                visible=False,
+                elem_classes=["upload-card"],
+            )
+
+        with gr.Group():
+            gr.Markdown("### 2. 選擇 AI 服務")
+            with gr.Row():
                 provider = gr.Radio(
                     ["Gemini", "OpenAI"],
                     value="Gemini",
                     label="AI 服務",
                 )
-                uploaded_file = gr.File(
-                    label="上傳音檔或影片",
-                    type="filepath",
-                    file_types=["audio", "video"],
-                )
-                youtube_url = gr.Textbox(
-                    label="或貼上 YouTube 網址",
-                    placeholder="https://www.youtube.com/watch?v=...",
-                )
-                gr.Markdown(
-                    "⚠️ 使用 YouTube URL 時只會下載音訊並產生逐字稿與摘要，"
-                    "無法從影片擷取投影片截圖。若要搭配簡報內容，請選擇既有投影片，"
-                    "或下載完整影片後改用上傳。"
-                )
-                slide_source_mode = gr.Radio(
-                    SLIDE_SOURCE_OPTIONS,
-                    value=SLIDE_SOURCE_AUTO,
-                    label="投影片來源",
-                )
-                existing_slides_folder = gr.File(
-                    label="選擇舊的 slides 資料夾",
-                    file_count="directory",
-                    file_types=["image"],
-                    type="filepath",
-                    visible=False,
-                )
-                existing_slide_images = gr.File(
-                    label="或一次選擇多張既有投影片圖片",
-                    file_count="multiple",
-                    file_types=["image"],
-                    type="filepath",
-                    visible=False,
-                )
-            with gr.Column(scale=2):
                 api_key = gr.Textbox(
-                    label="API Key（依上方選擇 Gemini 或 OpenAI）",
+                    label="API Key",
                     type="password",
                     placeholder="只保留在本次程式記憶體中",
                 )
+            with gr.Row():
                 language = gr.Dropdown(
                     ["自動偵測", "繁體中文", "英文", "日文"],
                     value="自動偵測",
@@ -152,13 +215,13 @@ def build_app() -> gr.Blocks:
                     label="摘要格式",
                 )
 
-        glossary = gr.Textbox(
-            label="專有名詞（選填）",
-            placeholder="每行一個或以逗號分隔，例如：產品名、人名、公司名",
-            lines=2,
-        )
-
         with gr.Accordion("進階設定", open=False):
+            glossary = gr.Textbox(
+                label="轉錄提示詞（選填）",
+                placeholder="每行一個，例如：人名、公司名、產品名、專業術語",
+                info="提供容易辨識錯誤的詞彙，幫助模型改善逐字稿拼寫；不需要時留空即可。",
+                lines=2,
+            )
             gr.Markdown("**Gemini 設定**（Gemini 會使用同一個多模態模型完成轉錄與摘要）")
             gemini_model = gr.Textbox(
                 value=settings.gemini_model,
@@ -195,8 +258,29 @@ def build_app() -> gr.Blocks:
             with gr.Tab("匯出檔案"):
                 files_output = gr.File(label="下載結果", file_count="multiple")
 
-        def displayed_slide_source_options(upload_path, url: str):
-            available = available_slide_source_options(upload_path, url or "")
+        def effective_slide_source_inputs(
+            selected_source: str,
+            upload_path,
+            url: str,
+        ):
+            if selected_source == SOURCE_YOUTUBE:
+                return None, (url or "https://youtube.invalid/")
+            return upload_path, ""
+
+        def displayed_slide_source_options(
+            selected_source: str,
+            upload_path,
+            url: str,
+        ):
+            effective_upload, effective_url = effective_slide_source_inputs(
+                selected_source,
+                upload_path,
+                url,
+            )
+            available = available_slide_source_options(
+                effective_upload,
+                effective_url,
+            )
             if SLIDE_SOURCE_AUTO in available:
                 return list(SLIDE_SOURCE_OPTIONS)
             return [
@@ -208,12 +292,30 @@ def build_app() -> gr.Blocks:
                 SLIDE_SOURCE_NONE,
             ]
 
-        def source_control_updates(upload_path, url: str, current_mode: str):
-            mode = normalize_slide_source_mode(upload_path, url or "", current_mode)
+        def source_control_updates(
+            selected_source: str,
+            upload_path,
+            url: str,
+            current_mode: str,
+        ):
+            effective_upload, effective_url = effective_slide_source_inputs(
+                selected_source,
+                upload_path,
+                url,
+            )
+            mode = normalize_slide_source_mode(
+                effective_upload,
+                effective_url,
+                current_mode,
+            )
             visible = mode == SLIDE_SOURCE_EXISTING
             return (
                 gr.update(
-                    choices=displayed_slide_source_options(upload_path, url),
+                    choices=displayed_slide_source_options(
+                        selected_source,
+                        upload_path,
+                        url,
+                    ),
                     value=mode,
                 ),
                 gr.update(visible=visible),
@@ -222,12 +324,18 @@ def build_app() -> gr.Blocks:
 
         def validate_slide_source_selection(
             selected_mode: str,
+            selected_source: str,
             upload_path,
             url: str,
         ):
-            mode = normalize_slide_source_mode(
+            effective_upload, effective_url = effective_slide_source_inputs(
+                selected_source,
                 upload_path,
-                url or "",
+                url,
+            )
+            mode = normalize_slide_source_mode(
+                effective_upload,
+                effective_url,
                 selected_mode,
             )
             visible = mode == SLIDE_SOURCE_EXISTING
@@ -237,31 +345,61 @@ def build_app() -> gr.Blocks:
                 gr.update(visible=visible),
             )
 
-        def use_youtube_source(url: str, upload_path, current_mode: str):
-            has_url = bool((url or "").strip())
-            effective_upload = None if has_url else upload_path
-            slide_updates = source_control_updates(
-                effective_upload,
-                url or "",
-                current_mode,
+        def change_source_type(
+            selected_source: str,
+            upload_path,
+            url: str,
+        ):
+            default_mode = (
+                SLIDE_SOURCE_AUTO
+                if selected_source == SOURCE_UPLOAD
+                else SLIDE_SOURCE_NONE
             )
-            upload_update = gr.update(value=None) if has_url else gr.update()
-            return (upload_update, *slide_updates)
-
-        def use_uploaded_source(upload_path, url: str, current_mode: str):
-            has_upload = bool(upload_path)
-            effective_url = "" if has_upload else (url or "")
             slide_updates = source_control_updates(
+                selected_source,
                 upload_path,
-                effective_url,
+                url,
+                default_mode,
+            )
+            return (
+                gr.update(visible=selected_source == SOURCE_UPLOAD),
+                gr.update(visible=selected_source == SOURCE_YOUTUBE),
+                *slide_updates,
+            )
+
+        def refresh_slide_sources(
+            upload_path,
+            url: str,
+            selected_source: str,
+            current_mode: str,
+        ):
+            return source_control_updates(
+                selected_source,
+                upload_path,
+                url,
                 current_mode,
             )
-            url_update = gr.update(value="") if has_upload else gr.update()
-            return (url_update, *slide_updates)
+
+        source_type.input(
+            change_source_type,
+            inputs=[source_type, uploaded_file, youtube_url],
+            outputs=[
+                upload_source_group,
+                youtube_source_group,
+                slide_source_mode,
+                existing_slides_folder,
+                existing_slide_images,
+            ],
+        )
 
         slide_source_mode.input(
             validate_slide_source_selection,
-            inputs=[slide_source_mode, uploaded_file, youtube_url],
+            inputs=[
+                slide_source_mode,
+                source_type,
+                uploaded_file,
+                youtube_url,
+            ],
             outputs=[
                 slide_source_mode,
                 existing_slides_folder,
@@ -270,10 +408,14 @@ def build_app() -> gr.Blocks:
         )
 
         youtube_url.input(
-            use_youtube_source,
-            inputs=[youtube_url, uploaded_file, slide_source_mode],
-            outputs=[
+            refresh_slide_sources,
+            inputs=[
                 uploaded_file,
+                youtube_url,
+                source_type,
+                slide_source_mode,
+            ],
+            outputs=[
                 slide_source_mode,
                 existing_slides_folder,
                 existing_slide_images,
@@ -281,10 +423,14 @@ def build_app() -> gr.Blocks:
         )
 
         uploaded_file.upload(
-            use_uploaded_source,
-            inputs=[uploaded_file, youtube_url, slide_source_mode],
-            outputs=[
+            refresh_slide_sources,
+            inputs=[
+                uploaded_file,
                 youtube_url,
+                source_type,
+                slide_source_mode,
+            ],
+            outputs=[
                 slide_source_mode,
                 existing_slides_folder,
                 existing_slide_images,
@@ -292,10 +438,14 @@ def build_app() -> gr.Blocks:
         )
 
         uploaded_file.clear(
-            use_uploaded_source,
-            inputs=[uploaded_file, youtube_url, slide_source_mode],
-            outputs=[
+            refresh_slide_sources,
+            inputs=[
+                uploaded_file,
                 youtube_url,
+                source_type,
+                slide_source_mode,
+            ],
+            outputs=[
                 slide_source_mode,
                 existing_slides_folder,
                 existing_slide_images,
@@ -305,6 +455,7 @@ def build_app() -> gr.Blocks:
         run_button.click(
             process,
             inputs=[
+                source_type,
                 provider,
                 uploaded_file,
                 youtube_url,
