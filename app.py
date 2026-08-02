@@ -9,6 +9,7 @@ from video_summary.config import settings
 from video_summary.pipeline import (
     SLIDE_SOURCE_AUTO,
     SLIDE_SOURCE_EXISTING,
+    SLIDE_SOURCE_NONE,
     SLIDE_SOURCE_OPTIONS,
     available_slide_source_options,
     normalize_slide_source_mode,
@@ -194,16 +195,44 @@ def build_app() -> gr.Blocks:
             with gr.Tab("匯出檔案"):
                 files_output = gr.File(label="下載結果", file_count="multiple")
 
-        def toggle_existing_slide_inputs(mode: str):
-            visible = mode == SLIDE_SOURCE_EXISTING
-            return gr.update(visible=visible), gr.update(visible=visible)
+        def displayed_slide_source_options(upload_path, url: str):
+            available = available_slide_source_options(upload_path, url or "")
+            if SLIDE_SOURCE_AUTO in available:
+                return list(SLIDE_SOURCE_OPTIONS)
+            return [
+                (
+                    f"🔒 {SLIDE_SOURCE_AUTO}（目前來源不可使用）",
+                    SLIDE_SOURCE_AUTO,
+                ),
+                SLIDE_SOURCE_EXISTING,
+                SLIDE_SOURCE_NONE,
+            ]
 
         def source_control_updates(upload_path, url: str, current_mode: str):
-            options = available_slide_source_options(upload_path, url or "")
             mode = normalize_slide_source_mode(upload_path, url or "", current_mode)
             visible = mode == SLIDE_SOURCE_EXISTING
             return (
-                gr.update(choices=options, value=mode),
+                gr.update(
+                    choices=displayed_slide_source_options(upload_path, url),
+                    value=mode,
+                ),
+                gr.update(visible=visible),
+                gr.update(visible=visible),
+            )
+
+        def validate_slide_source_selection(
+            selected_mode: str,
+            upload_path,
+            url: str,
+        ):
+            mode = normalize_slide_source_mode(
+                upload_path,
+                url or "",
+                selected_mode,
+            )
+            visible = mode == SLIDE_SOURCE_EXISTING
+            return (
+                gr.update(value=mode),
                 gr.update(visible=visible),
                 gr.update(visible=visible),
             )
@@ -230,10 +259,14 @@ def build_app() -> gr.Blocks:
             url_update = gr.update(value="") if has_upload else gr.update()
             return (url_update, *slide_updates)
 
-        slide_source_mode.change(
-            toggle_existing_slide_inputs,
-            inputs=[slide_source_mode],
-            outputs=[existing_slides_folder, existing_slide_images],
+        slide_source_mode.input(
+            validate_slide_source_selection,
+            inputs=[slide_source_mode, uploaded_file, youtube_url],
+            outputs=[
+                slide_source_mode,
+                existing_slides_folder,
+                existing_slide_images,
+            ],
         )
 
         youtube_url.input(
