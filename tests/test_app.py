@@ -17,8 +17,8 @@ def _run_process(monkeypatch, source_type: str) -> dict[str, object]:
         "test-key",
         "自動偵測",
         "gpt-4o-transcribe",
-        "gpt-test",
-        "gemini-test",
+        None,
+        None,
         "low",
         "一般重點摘要",
         "",
@@ -38,6 +38,8 @@ def test_upload_source_ignores_hidden_youtube_url(monkeypatch) -> None:
 
     assert captured["uploaded_path"] == "lecture.mp4"
     assert captured["youtube_url"] == ""
+    assert captured["summary_model"] == app.settings.summary_model
+    assert captured["gemini_model"] == app.settings.gemini_model
 
 
 def test_youtube_source_ignores_hidden_uploaded_file(monkeypatch) -> None:

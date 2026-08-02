@@ -50,6 +50,10 @@ def test_youtube_url_disables_automatic_slide_extraction() -> None:
     )
 
 
+def test_empty_youtube_value_accepts_none() -> None:
+    assert SLIDE_SOURCE_AUTO in available_slide_source_options(None, None)
+
+
 def test_audio_upload_disables_automatic_slide_extraction() -> None:
     assert available_slide_source_options("lecture.mp3", "") == [
         SLIDE_SOURCE_EXISTING,

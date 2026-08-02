@@ -33,10 +33,10 @@ SLIDE_SOURCE_OPTIONS = [
 
 def available_slide_source_options(
     uploaded_path: str | None,
-    youtube_url: str,
+    youtube_url: str | None,
 ) -> list[str]:
     """Return slide modes that can work with the currently selected media source."""
-    if youtube_url.strip():
+    if (youtube_url or "").strip():
         return [SLIDE_SOURCE_EXISTING, SLIDE_SOURCE_NONE]
     if uploaded_path and not is_video_file(Path(uploaded_path)):
         return [SLIDE_SOURCE_EXISTING, SLIDE_SOURCE_NONE]
@@ -45,7 +45,7 @@ def available_slide_source_options(
 
 def normalize_slide_source_mode(
     uploaded_path: str | None,
-    youtube_url: str,
+    youtube_url: str | None,
     selected_mode: str,
 ) -> str:
     options = available_slide_source_options(uploaded_path, youtube_url)
@@ -82,11 +82,11 @@ def run_pipeline(
     settings: Settings,
     provider: str,
     uploaded_path: str | None,
-    youtube_url: str,
-    api_key_input: str,
-    transcription_model: str,
-    summary_model: str,
-    gemini_model: str,
+    youtube_url: str | None,
+    api_key_input: str | None,
+    transcription_model: str | None,
+    summary_model: str | None,
+    gemini_model: str | None,
     reasoning_effort: str,
     language_label: str,
     glossary: str,
@@ -96,7 +96,13 @@ def run_pipeline(
     delete_temp: bool,
     status_callback=None,
 ) -> tuple[str, str, list[str], str]:
-    provider_key = provider.strip().lower()
+    provider = (provider or "").strip()
+    youtube_url = (youtube_url or "").strip()
+    transcription_model = (transcription_model or settings.transcription_model).strip()
+    summary_model = (summary_model or settings.summary_model).strip()
+    gemini_model = (gemini_model or settings.gemini_model).strip()
+    glossary = glossary or ""
+    provider_key = provider.lower()
     if provider_key not in {"gemini", "openai"}:
         raise PipelineError("不支援的 AI 服務商。")
     if slide_source_mode not in SLIDE_SOURCE_OPTIONS:
@@ -104,15 +110,15 @@ def run_pipeline(
     configured_key = (
         settings.gemini_api_key if provider_key == "gemini" else settings.openai_api_key
     )
-    api_key = api_key_input.strip() or configured_key
+    api_key = (api_key_input or "").strip() or configured_key
     if not api_key:
         environment_name = "GEMINI_API_KEY" if provider_key == "gemini" else "OPENAI_API_KEY"
         raise PipelineError(
             f"請在畫面輸入 {provider} API Key，或在 .env 設定 {environment_name}。"
         )
-    if not uploaded_path and not youtube_url.strip():
+    if not uploaded_path and not youtube_url:
         raise PipelineError("請上傳音檔／影片，或輸入 YouTube 網址。")
-    if uploaded_path and youtube_url.strip():
+    if uploaded_path and youtube_url:
         raise PipelineError("請只選擇一種來源：上傳檔案或 YouTube 網址。")
     slide_source_mode = normalize_slide_source_mode(
         uploaded_path,
@@ -133,7 +139,7 @@ def run_pipeline(
         source_path, source_name = _copy_upload(uploaded_path, source_dir)
     else:
         source_path, source_name = download_authorized_audio(
-            youtube_url.strip(),
+            youtube_url,
             source_dir,
             settings.ytdlp_cookies_file,
         )

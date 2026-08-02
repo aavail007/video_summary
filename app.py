@@ -83,6 +83,10 @@ def process(
 ):
     status_messages: list[str] = []
 
+    def normalized_text(value, default: str = "") -> str:
+        text = value if isinstance(value, str) else ""
+        return text.strip() or default
+
     def file_paths(value) -> list[str]:
         if not value:
             return []
@@ -95,6 +99,7 @@ def process(
         progress((len(status_messages) % 10) / 10, desc=message)
 
     try:
+        youtube_url = normalized_text(youtube_url)
         if source_type == SOURCE_UPLOAD:
             youtube_url = ""
         elif source_type == SOURCE_YOUTUBE:
@@ -104,18 +109,27 @@ def process(
 
         transcript, summary, files, status = run_pipeline(
             settings=settings,
-            provider=provider,
+            provider=normalized_text(provider),
             uploaded_path=uploaded_file,
             youtube_url=youtube_url,
-            api_key_input=api_key,
-            transcription_model=transcription_model,
-            summary_model=summary_model.strip(),
-            gemini_model=gemini_model.strip(),
-            reasoning_effort=reasoning_effort,
-            language_label=language,
-            glossary=glossary,
-            summary_style=summary_style,
-            slide_source_mode=slide_source_mode,
+            api_key_input=normalized_text(api_key),
+            transcription_model=normalized_text(
+                transcription_model,
+                settings.transcription_model,
+            ),
+            summary_model=normalized_text(summary_model, settings.summary_model),
+            gemini_model=normalized_text(gemini_model, settings.gemini_model),
+            reasoning_effort=normalized_text(
+                reasoning_effort,
+                settings.summary_reasoning_effort,
+            ),
+            language_label=normalized_text(language, "自動偵測"),
+            glossary=normalized_text(glossary),
+            summary_style=normalized_text(summary_style, "一般重點摘要"),
+            slide_source_mode=normalized_text(
+                slide_source_mode,
+                SLIDE_SOURCE_NONE,
+            ),
             existing_slide_paths=(
                 file_paths(existing_slides_folder)
                 + file_paths(existing_slide_images)
