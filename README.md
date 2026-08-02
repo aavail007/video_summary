@@ -36,6 +36,27 @@
 若專案是在 2026 年 6 月前安裝，請重新執行 `setup.bat`，將
 `google-genai` 更新至 2.x；舊版 SDK 已無法呼叫新版 Interactions API。
 
+## macOS 快速開始
+
+需要 Python 3.10 以上版本，建議使用 Python 3.11 或 3.12。第一次安裝時，在
+「終端機」進入專案目錄並執行：
+
+```bash
+bash setup.command
+```
+
+腳本會建立 `.venv`、安裝 `requirements.txt`、在尚未存在時複製 `.env.example`
+為 `.env`，並將兩個 `.command` 腳本設為可執行。安裝完成後可直接雙擊
+`run.command`，或在終端機執行：
+
+```bash
+./run.command
+```
+
+如果 macOS 阻擋第一次執行，可在終端機使用 `bash run.command`。若內建 FFmpeg
+無法使用，可先透過 Homebrew 執行 `brew install ffmpeg`。啟動後瀏覽器會開啟
+<http://127.0.0.1:7860>。
+
 ## API Key 與費用
 
 - Gemini：到 [Google AI Studio](https://aistudio.google.com/app/apikey) 的 API Keys 頁面，對可用專案按「Create API key」。畫面中的 Gemini 教育帳號或 Workspace 帳號不代表一定自動包含 API 額度，實際可用性以該專案的狀態、管理員政策及 Usage 頁面為準。
