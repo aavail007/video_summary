@@ -1,4 +1,9 @@
 const CHUNK_MS = 20_000;
+const MAX_AUTO_ATTEMPTS = 3;
+const STORAGE_KEY = "video-summary-live-transcript-v1";
+const DB_NAME = "video-summary-live";
+const DB_VERSION = 1;
+const CHUNK_STORE = "chunks";
 
 const elements = {
   provider: document.querySelector("#provider"),
@@ -17,7 +22,10 @@ const elements = {
   statusDot: document.querySelector("#status-dot"),
   statusText: document.querySelector("#status-text"),
   timer: document.querySelector("#timer"),
-  chunkStatus: document.querySelector("#chunk-status"),
+  recordingCount: document.querySelector("#recording-count"),
+  waitingCount: document.querySelector("#waiting-count"),
+  completedCount: document.querySelector("#completed-count"),
+  failedCount: document.querySelector("#failed-count"),
   transcript: document.querySelector("#transcript"),
   keyHint: document.querySelector("#key-hint"),
 };
@@ -31,13 +39,15 @@ const state = {
   cycleTimer: null,
   timerId: null,
   startedAt: 0,
-  queue: Promise.resolve(),
-  queuedChunks: 0,
   entries: [],
+  chunks: new Map(),
+  completedChunks: 0,
+  processingQueue: false,
   config: {},
   configLoaded: false,
   activeProvider: "gemini",
   enteredKeys: { gemini: "", openai: "" },
+  db: null,
 };
 
 function formatTime(totalSeconds) {
@@ -82,28 +92,135 @@ function setControls(recording) {
     && canStart
     && elements.statusText.textContent.startsWith("請先輸入")
   ) {
-    setStatus("API Key 已就緒，可以開始收音");
+    setStatus("API Key 已準備，可以開始收音");
   }
 }
 
-function updateQueueStatus() {
-  elements.chunkStatus.textContent = state.queuedChunks
-    ? `正在等待 ${state.queuedChunks} 段轉錄完成…`
-    : "";
+function updateChunkCounts() {
+  const chunks = [...state.chunks.values()];
+  const waiting = chunks.filter((item) => ["waiting", "processing"].includes(item.status)).length;
+  const failed = chunks.filter((item) => item.status === "failed").length;
+  elements.recordingCount.textContent = state.active ? "1" : "0";
+  elements.waitingCount.textContent = String(waiting);
+  elements.completedCount.textContent = String(state.completedChunks);
+  elements.failedCount.textContent = String(failed);
 }
 
-function appendEntry(entry) {
-  state.entries.push(entry);
+function saveTranscript() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      entries: state.entries,
+      completedChunks: state.completedChunks,
+      savedAt: new Date().toISOString(),
+    }));
+  } catch (_) {
+    // Private browsing or a full browser quota must not interrupt transcription.
+  }
+}
+
+function restoreTranscript() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+    if (!saved) return;
+    state.entries = Array.isArray(saved.entries) ? saved.entries : [];
+    state.completedChunks = Number(saved.completedChunks) || 0;
+  } catch (_) {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+}
+
+function renderTranscript() {
+  elements.transcript.replaceChildren();
+  if (!state.entries.length) {
+    elements.transcript.className = "transcript-empty";
+    elements.transcript.textContent = "開始收音後，逐字稿會顯示在這裡。";
+    return;
+  }
   elements.transcript.className = "";
-  const article = document.createElement("article");
-  article.className = `entry${entry.error ? " error" : ""}`;
-  const time = document.createElement("time");
-  time.textContent = formatTime(entry.offset);
-  const paragraph = document.createElement("p");
-  paragraph.textContent = entry.text;
-  article.append(time, paragraph);
-  elements.transcript.append(article);
-  article.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  [...state.entries]
+    .sort((left, right) => left.offset - right.offset)
+    .forEach((entry) => {
+      const article = document.createElement("article");
+      article.className = `entry${entry.error ? " error" : ""}`;
+      const time = document.createElement("time");
+      time.textContent = formatTime(entry.offset);
+      const paragraph = document.createElement("p");
+      paragraph.textContent = entry.text;
+      article.append(time, paragraph);
+      if (entry.error && entry.chunkId) {
+        const retry = document.createElement("button");
+        retry.className = "retry-button";
+        retry.type = "button";
+        retry.textContent = "重試這個片段";
+        retry.addEventListener("click", () => retryChunk(entry.chunkId));
+        article.append(retry);
+      }
+      elements.transcript.append(article);
+    });
+  elements.transcript.lastElementChild?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function upsertEntry(entry) {
+  const existingIndex = entry.chunkId
+    ? state.entries.findIndex((item) => item.chunkId === entry.chunkId)
+    : -1;
+  if (existingIndex >= 0) state.entries[existingIndex] = entry;
+  else state.entries.push(entry);
+  saveTranscript();
+  renderTranscript();
+}
+
+function openDatabase() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.addEventListener("upgradeneeded", () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(CHUNK_STORE)) {
+        database.createObjectStore(CHUNK_STORE, { keyPath: "id" });
+      }
+    });
+    request.addEventListener("success", () => resolve(request.result));
+    request.addEventListener("error", () => reject(request.error));
+  });
+}
+
+function chunkTransaction(mode, operation) {
+  if (!state.db) return Promise.resolve(undefined);
+  return new Promise((resolve, reject) => {
+    const transaction = state.db.transaction(CHUNK_STORE, mode);
+    const store = transaction.objectStore(CHUNK_STORE);
+    const request = operation(store);
+    request.addEventListener("success", () => resolve(request.result));
+    request.addEventListener("error", () => reject(request.error));
+  });
+}
+
+async function saveChunk(chunk) {
+  try {
+    return await chunkTransaction("readwrite", (store) => store.put(chunk));
+  } catch (_) {
+    return undefined;
+  }
+}
+
+async function deleteChunk(id) {
+  try {
+    return await chunkTransaction("readwrite", (store) => store.delete(id));
+  } catch (_) {
+    return undefined;
+  }
+}
+
+function loadChunks() {
+  return chunkTransaction("readonly", (store) => store.getAll());
+}
+
+async function clearChunks() {
+  try {
+    return await chunkTransaction("readwrite", (store) => store.clear());
+  } catch (_) {
+    return undefined;
+  }
 }
 
 function supportedMimeType() {
@@ -116,35 +233,135 @@ function supportedMimeType() {
   return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || "";
 }
 
-async function uploadChunk(blob, offset) {
-  state.queuedChunks += 1;
-  updateQueueStatus();
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function requestTranscription(chunk) {
+  const response = await fetch("/api/live/transcribe", {
+    method: "POST",
+    headers: {
+      "Content-Type": chunk.contentType || "audio/webm",
+      "X-AI-Provider": elements.provider.value,
+      "X-API-Key": encodeURIComponent(elements.apiKey.value.trim()),
+      "X-Language": elements.language.value,
+      "X-Gemini-Model": encodeURIComponent(elements.geminiModel.value.trim()),
+      "X-OpenAI-Model": encodeURIComponent(elements.openaiModel.value),
+    },
+    body: chunk.blob,
+  });
+  let result;
   try {
-    const response = await fetch("/api/live/transcribe", {
-      method: "POST",
-      headers: {
-        "Content-Type": blob.type || "audio/webm",
-        "X-AI-Provider": elements.provider.value,
-        "X-API-Key": encodeURIComponent(elements.apiKey.value.trim()),
-        "X-Language": elements.language.value,
-        "X-Gemini-Model": encodeURIComponent(elements.geminiModel.value.trim()),
-        "X-OpenAI-Model": encodeURIComponent(elements.openaiModel.value),
-      },
-      body: blob,
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || "轉錄失敗");
-    if (result.text) appendEntry({ offset, text: result.text, error: false });
-  } catch (error) {
-    appendEntry({ offset, text: `⚠ ${error.message}`, error: true });
-    setStatus("部分音訊轉錄失敗，錄音仍可繼續", "error");
-  } finally {
-    state.queuedChunks -= 1;
-    updateQueueStatus();
-    if (!state.active && state.queuedChunks === 0) {
-      setStatus("收音已結束");
+    result = await response.json();
+  } catch (_) {
+    result = {};
+  }
+  if (!response.ok) {
+    const error = new Error(result.detail || `轉錄失敗（HTTP ${response.status}）`);
+    error.retryAfter = Number(response.headers.get("Retry-After")) || 0;
+    throw error;
+  }
+  return result;
+}
+
+async function processChunk(chunk) {
+  chunk.status = "processing";
+  await saveChunk(chunk);
+  updateChunkCounts();
+  let lastError;
+  while (chunk.attempts < MAX_AUTO_ATTEMPTS) {
+    try {
+      chunk.attempts += 1;
+      await saveChunk(chunk);
+      const result = await requestTranscription(chunk);
+      if (result.text) {
+        upsertEntry({
+          offset: chunk.offset,
+          text: result.text,
+          error: false,
+          chunkId: chunk.id,
+        });
+      }
+      state.completedChunks += 1;
+      state.chunks.delete(chunk.id);
+      await deleteChunk(chunk.id);
+      saveTranscript();
+      updateChunkCounts();
+      return;
+    } catch (error) {
+      lastError = error;
+      if (chunk.attempts < MAX_AUTO_ATTEMPTS) {
+        const waitMs = Math.max(error.retryAfter * 1000, chunk.attempts * 2000);
+        setStatus(`片段轉錄失敗，${Math.ceil(waitMs / 1000)} 秒後自動重試`, "error");
+        await delay(waitMs);
+      }
     }
   }
+  chunk.status = "failed";
+  await saveChunk(chunk);
+  upsertEntry({
+    offset: chunk.offset,
+    text: `轉錄失敗：${lastError?.message || "未知錯誤"}`,
+    error: true,
+    chunkId: chunk.id,
+  });
+  updateChunkCounts();
+}
+
+async function processQueue() {
+  if (state.processingQueue || !state.configLoaded || !hasProviderKey()) return;
+  state.processingQueue = true;
+  try {
+    let chunk = [...state.chunks.values()]
+      .filter((item) => item.status === "waiting")
+      .sort((left, right) => left.offset - right.offset)[0];
+    while (chunk) {
+      await processChunk(chunk);
+      chunk = [...state.chunks.values()]
+        .filter((item) => item.status === "waiting")
+        .sort((left, right) => left.offset - right.offset)[0];
+    }
+  } finally {
+    state.processingQueue = false;
+    if (!state.active && ![...state.chunks.values()].some((item) => item.status === "waiting")) {
+      const failed = [...state.chunks.values()].some((item) => item.status === "failed");
+      setStatus(failed ? "部分片段失敗，可逐段重試" : "收音與轉錄已完成", failed ? "error" : "idle");
+    }
+  }
+}
+
+async function retryChunk(chunkId) {
+  if (!hasProviderKey()) {
+    setStatus("請先輸入目前 AI 服務的 API Key", "error");
+    return;
+  }
+  const chunk = state.chunks.get(chunkId);
+  if (!chunk) return;
+  chunk.attempts = 0;
+  chunk.status = "waiting";
+  await saveChunk(chunk);
+  state.entries = state.entries.filter((item) => item.chunkId !== chunkId);
+  saveTranscript();
+  renderTranscript();
+  updateChunkCounts();
+  setStatus("已將失敗片段加入重試佇列");
+  processQueue();
+}
+
+async function enqueueChunk(blob, offset) {
+  const chunk = {
+    id: crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+    blob,
+    offset,
+    contentType: blob.type || "audio/webm",
+    attempts: 0,
+    status: "waiting",
+    createdAt: new Date().toISOString(),
+  };
+  state.chunks.set(chunk.id, chunk);
+  await saveChunk(chunk);
+  updateChunkCounts();
+  processQueue();
 }
 
 function recordNextChunk() {
@@ -161,12 +378,12 @@ function recordNextChunk() {
   recorder.addEventListener("stop", () => {
     clearTimeout(state.cycleTimer);
     const blob = new Blob(parts, { type: recorder.mimeType || mimeType || "audio/webm" });
-    if (blob.size) {
-      state.queue = state.queue.then(() => uploadChunk(blob, offset));
-    }
+    if (blob.size) enqueueChunk(blob, offset);
     if (state.active) recordNextChunk();
+    updateChunkCounts();
   }, { once: true });
   recorder.start();
+  updateChunkCounts();
   state.cycleTimer = setTimeout(() => {
     if (recorder.state === "recording") recorder.stop();
   }, CHUNK_MS);
@@ -178,7 +395,7 @@ async function startRecording(kind) {
     return;
   }
   if (!navigator.mediaDevices || !window.MediaRecorder) {
-    setStatus("此瀏覽器不支援錄音功能，請改用最新版 Chrome 或 Edge", "error");
+    setStatus("目前瀏覽器不支援錄音功能，請改用最新版 Chrome 或 Edge", "error");
     return;
   }
   const acquiredStreams = [];
@@ -187,22 +404,15 @@ async function startRecording(kind) {
     let recorderStream;
     if (kind === "microphone") {
       const microphoneStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
       acquiredStreams.push(microphoneStream);
       recorderStream = new MediaStream(microphoneStream.getAudioTracks());
     } else {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: true,
-      });
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
       acquiredStreams.push(displayStream);
       if (!displayStream.getAudioTracks().length) {
-        throw new Error("分享來源沒有音訊，請選擇分頁並勾選分享音訊");
+        throw new Error("分享來源沒有音訊，請重新選擇並勾選分享音訊");
       }
       displayStream.getVideoTracks().forEach((track) => {
         track.addEventListener("ended", stopRecording, { once: true });
@@ -210,26 +420,16 @@ async function startRecording(kind) {
 
       if (kind === "mixed") {
         const microphoneStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-          },
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
         });
         acquiredStreams.push(microphoneStream);
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        if (!AudioContextClass) throw new Error("此瀏覽器不支援麥克風與螢幕混音");
+        if (!AudioContextClass) throw new Error("目前瀏覽器不支援混合收音");
         audioContext = new AudioContextClass();
         await audioContext.resume();
         const destination = audioContext.createMediaStreamDestination();
-        const displaySource = audioContext.createMediaStreamSource(displayStream);
-        const microphoneSource = audioContext.createMediaStreamSource(microphoneStream);
-        const displayGain = audioContext.createGain();
-        const microphoneGain = audioContext.createGain();
-        displayGain.gain.value = 1;
-        microphoneGain.gain.value = 1;
-        displaySource.connect(displayGain).connect(destination);
-        microphoneSource.connect(microphoneGain).connect(destination);
+        audioContext.createMediaStreamSource(displayStream).connect(destination);
+        audioContext.createMediaStreamSource(microphoneStream).connect(destination);
         recorderStream = destination.stream;
       } else {
         recorderStream = new MediaStream(displayStream.getAudioTracks());
@@ -244,8 +444,8 @@ async function startRecording(kind) {
     setControls(true);
     const statusMessages = {
       microphone: "麥克風收音中",
-      screen: "螢幕音訊收音中",
-      mixed: "會議混合收音中（麥克風＋分享音訊）",
+      screen: "分享來源收音中",
+      mixed: "會議混合收音中（麥克風與分享音訊）",
     };
     setStatus(statusMessages[kind], "recording");
     elements.timer.textContent = "00:00:00";
@@ -254,9 +454,7 @@ async function startRecording(kind) {
     }, 1000);
     recordNextChunk();
   } catch (error) {
-    acquiredStreams.forEach((stream) => {
-      stream.getTracks().forEach((track) => track.stop());
-    });
+    acquiredStreams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
     if (audioContext && audioContext.state !== "closed") audioContext.close();
     setStatus(`無法開始收音：${error.message}`, "error");
     setControls(false);
@@ -269,35 +467,42 @@ function stopRecording() {
   clearTimeout(state.cycleTimer);
   clearInterval(state.timerId);
   if (state.recorder?.state === "recording") state.recorder.stop();
-  state.sourceStreams.forEach((stream) => {
-    stream.getTracks().forEach((track) => track.stop());
-  });
+  state.sourceStreams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
   state.recorderStream?.getTracks().forEach((track) => track.stop());
-  if (state.audioContext && state.audioContext.state !== "closed") {
-    state.audioContext.close();
-  }
+  if (state.audioContext && state.audioContext.state !== "closed") state.audioContext.close();
   state.sourceStreams = [];
   state.recorderStream = null;
   state.audioContext = null;
   setControls(false);
-  setStatus("收音已停止，正在完成剩餘轉錄");
+  updateChunkCounts();
+  setStatus("收音已停止，等待剩餘片段轉錄");
 }
 
-function clearTranscript() {
+async function clearTranscript() {
   state.entries = [];
-  elements.transcript.className = "transcript-empty";
-  elements.transcript.textContent = "開始收音後，逐字稿會顯示在這裡。";
+  state.chunks.clear();
+  state.completedChunks = 0;
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch (_) {
+    // Keep the in-memory clear action working even when storage is unavailable.
+  }
+  await clearChunks();
+  renderTranscript();
+  updateChunkCounts();
+  setStatus("已清除逐字稿與暫存片段");
 }
 
 function downloadMarkdown() {
-  if (!state.entries.length) {
+  const completedEntries = state.entries.filter((entry) => !entry.error);
+  if (!completedEntries.length) {
     setStatus("目前沒有可下載的逐字稿", "error");
     return;
   }
   const lines = ["# 即時收音逐字稿", ""];
-  state.entries.forEach((entry) => {
-    lines.push(`## ${formatTime(entry.offset)}`, "", entry.text, "");
-  });
+  completedEntries
+    .sort((left, right) => left.offset - right.offset)
+    .forEach((entry) => lines.push(`## ${formatTime(entry.offset)}`, "", entry.text, ""));
   const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
@@ -314,8 +519,8 @@ function updateProviderFields() {
     ? state.config.gemini_key_configured
     : state.config.openai_key_configured;
   elements.keyHint.textContent = configured
-    ? ".env 已設定此服務的 Key，也可在此暫時覆寫"
-    : "尚未在 .env 設定，請在此輸入自己的 API Key";
+    ? ".env 已設定此服務的 Key，可以直接使用"
+    : "尚未在 .env 設定，請輸入自己的 API Key";
   setControls(state.active);
 }
 
@@ -324,11 +529,13 @@ function handleProviderChange() {
   state.activeProvider = elements.provider.value;
   elements.apiKey.value = state.enteredKeys[state.activeProvider] || "";
   updateProviderFields();
+  processQueue();
 }
 
 function handleApiKeyInput() {
   state.enteredKeys[elements.provider.value] = elements.apiKey.value;
   setControls(state.active);
+  processQueue();
 }
 
 async function loadConfig() {
@@ -343,6 +550,24 @@ async function loadConfig() {
   }
 }
 
+async function initialize() {
+  restoreTranscript();
+  renderTranscript();
+  try {
+    state.db = await openDatabase();
+    const savedChunks = await loadChunks();
+    savedChunks.forEach((chunk) => {
+      if (chunk.status === "processing") chunk.status = "waiting";
+      state.chunks.set(chunk.id, chunk);
+    });
+  } catch (_) {
+    setStatus("瀏覽器無法保存音訊片段；本次仍可繼續使用", "error");
+  }
+  updateChunkCounts();
+  await loadConfig();
+  processQueue();
+}
+
 elements.provider.addEventListener("change", handleProviderChange);
 elements.apiKey.addEventListener("input", handleApiKeyInput);
 elements.micButton.addEventListener("click", () => startRecording("microphone"));
@@ -353,12 +578,8 @@ elements.clearButton.addEventListener("click", clearTranscript);
 elements.downloadButton.addEventListener("click", downloadMarkdown);
 window.addEventListener("beforeunload", () => {
   state.active = false;
-  state.sourceStreams.forEach((stream) => {
-    stream.getTracks().forEach((track) => track.stop());
-  });
-  if (state.audioContext && state.audioContext.state !== "closed") {
-    state.audioContext.close();
-  }
+  state.sourceStreams.forEach((stream) => stream.getTracks().forEach((track) => track.stop()));
+  if (state.audioContext && state.audioContext.state !== "closed") state.audioContext.close();
 });
 
-loadConfig();
+initialize();

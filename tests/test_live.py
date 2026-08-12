@@ -98,6 +98,13 @@ def test_live_assets_include_microphone_screen_and_markdown_controls() -> None:
     assert "function handleProviderChange()" in javascript
     assert "!state.configLoaded || !hasProviderKey()" in javascript
     assert 'fetch("/api/live/transcribe"' in javascript
+    assert "indexedDB.open" in javascript
+    assert "MAX_AUTO_ATTEMPTS = 3" in javascript
+    assert "function retryChunk" in javascript
+    assert 'id="recording-count"' in html
+    assert 'id="waiting-count"' in html
+    assert 'id="completed-count"' in html
+    assert "逐字稿會自動保存在此瀏覽器" in html
     assert 'href="/live-assets/theme.css"' in html
     assert "app-topbar-inner" in html
     assert html.count('class="app-card') == 3

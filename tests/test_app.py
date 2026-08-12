@@ -7,7 +7,7 @@ def _run_process(monkeypatch, source_type: str) -> dict[str, object]:
 
     def fake_run_pipeline(**kwargs):
         captured.update(kwargs)
-        return "transcript", "summary", ["result.md"], "done"
+        return "transcript", "summary", ["result.md"], "done", "20260812-120000-a1b2c3d4"
 
     monkeypatch.setattr(app, "run_pipeline", fake_run_pipeline)
     result = app.process(
@@ -30,7 +30,13 @@ def _run_process(monkeypatch, source_type: str) -> dict[str, object]:
         progress=lambda *args, **kwargs: None,
     )
 
-    assert result == ("done", "transcript", "summary", ["result.md"])
+    assert result == (
+        "done",
+        "transcript",
+        "summary",
+        ["result.md"],
+        "20260812-120000-a1b2c3d4",
+    )
     return captured
 
 

@@ -64,13 +64,14 @@ def transcribe_chunks(
     language_label: str,
     glossary: str,
     source_name: str,
+    initial_context: str = "",
     progress_callback=None,
 ) -> TranscriptResult:
     client = OpenAI(api_key=api_key)
     language = LANGUAGE_CODES.get(language_label)
     all_segments: list[TranscriptSegment] = []
     offset = 0.0
-    previous_context = ""
+    previous_context = initial_context
 
     for index, chunk in enumerate(chunks, start=1):
         duration = media_duration(chunk)
@@ -122,4 +123,3 @@ def transcribe_chunks(
         model=model,
         segments=all_segments,
     )
-

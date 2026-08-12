@@ -79,6 +79,7 @@ def transcribe_chunks_gemini(
     language_label: str,
     glossary: str,
     source_name: str,
+    initial_context: str = "",
     progress_callback=None,
     retry_callback=None,
 ) -> TranscriptResult:
@@ -86,7 +87,7 @@ def transcribe_chunks_gemini(
     requested_language = LANGUAGE_CODES.get(language_label)
     all_segments: list[TranscriptSegment] = []
     offset = 0.0
-    previous_context = ""
+    previous_context = initial_context
     detected_language: str | None = requested_language
 
     for index, chunk in enumerate(chunks, start=1):

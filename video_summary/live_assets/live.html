@@ -81,18 +81,24 @@
           「分享分頁音訊」；建議戴耳機，避免喇叭聲再次進入麥克風。本功能只取音訊，
           不會保存螢幕畫面。
         </p>
+        <p class="autosave-note">逐字稿會自動保存在此瀏覽器；尚未成功的音訊片段也會保留，直到轉錄成功或按下清除記錄。</p>
       </section>
 
       <section class="status-card" aria-live="polite">
         <span id="status-dot"></span>
         <strong id="status-text">尚未開始收音</strong>
+        <div class="chunk-counters" aria-label="音訊片段狀態">
+          <span>錄音中 <strong id="recording-count">0</strong></span>
+          <span>等待轉錄 <strong id="waiting-count">0</strong></span>
+          <span>已完成 <strong id="completed-count">0</strong></span>
+          <span class="failed-counter">失敗 <strong id="failed-count">0</strong></span>
+        </div>
         <span id="timer">00:00:00</span>
       </section>
 
       <section class="app-card transcript-card">
         <div class="transcript-heading">
           <div class="section-heading"><span class="step-badge">3</span><h2>即時逐字稿</h2></div>
-          <span id="chunk-status"></span>
         </div>
         <div id="transcript" class="transcript-empty">開始收音後，逐字稿會顯示在這裡。</div>
       </section>

@@ -108,6 +108,9 @@ APP_CSS = """
 SOURCE_UPLOAD = "上傳影片或音檔"
 SOURCE_YOUTUBE = "YouTube 網址"
 SOURCE_OPTIONS = [SOURCE_UPLOAD, SOURCE_YOUTUBE]
+ACTION_NEW = "new"
+ACTION_RESUME = "resume"
+ACTION_SUMMARY_ONLY = "summary_only"
 
 
 def process(
@@ -127,6 +130,8 @@ def process(
     existing_slides_folder,
     existing_slide_images,
     delete_temp,
+    job_id="",
+    action=ACTION_NEW,
     progress=gr.Progress(),
 ):
     status_messages: list[str] = []
@@ -155,7 +160,11 @@ def process(
         else:
             raise ValueError("不支援的影音來源。")
 
-        transcript, summary, files, status = run_pipeline(
+        resume_job_id = normalized_text(job_id) if action != ACTION_NEW else ""
+        if action != ACTION_NEW and not resume_job_id:
+            raise ValueError("請先輸入要恢復的工作編號。")
+
+        transcript, summary, files, status, active_job_id = run_pipeline(
             settings=settings,
             provider=normalized_text(provider),
             uploaded_path=uploaded_file,
@@ -183,12 +192,16 @@ def process(
                 + file_paths(existing_slide_images)
             ),
             delete_temp=delete_temp,
+            resume_job_id=resume_job_id,
+            summary_only=action == ACTION_SUMMARY_ONLY,
             status_callback=update_status,
         )
-        return status, transcript, summary, files
+        return status, transcript, summary, files, active_job_id
     except Exception as exc:
         traceback.print_exc()
-        return f"處理失敗：{exc}", "", "", []
+        failed_job_id = getattr(exc, "job_id", "") or normalized_text(job_id)
+        suffix = f"\n工作編號：{failed_job_id}，修正問題後可按「續跑工作」。" if failed_job_id else ""
+        return f"處理失敗：{exc}{suffix}", gr.update(), gr.update(), gr.update(), failed_job_id
 
 
 def build_app() -> gr.Blocks:
@@ -343,7 +356,15 @@ def build_app() -> gr.Blocks:
                     container=False,
                     elem_classes=["section-heading-host"],
                 )
-                run_button = gr.Button("開始產生逐字稿與摘要", variant="primary", size="lg")
+                with gr.Row():
+                    run_button = gr.Button("開始新工作", variant="primary", size="lg")
+                    resume_button = gr.Button("續跑工作", size="lg")
+                    summary_only_button = gr.Button("只重新摘要", size="lg")
+                job_id = gr.Textbox(
+                    label="工作編號",
+                    placeholder="開始後會自動顯示；也可貼上之前的工作編號",
+                    info="失敗續跑會略過已完成的音訊片段；只重新摘要不會再次轉錄。",
+                )
                 status = gr.Textbox(
                     label="狀態",
                     interactive=False,
@@ -547,27 +568,46 @@ def build_app() -> gr.Blocks:
             ],
         )
 
+        common_inputs = [
+            source_type,
+            provider,
+            uploaded_file,
+            youtube_url,
+            api_key,
+            language,
+            transcription_model,
+            summary_model,
+            gemini_model,
+            reasoning_effort,
+            summary_style,
+            glossary,
+            slide_source_mode,
+            existing_slides_folder,
+            existing_slide_images,
+            delete_temp,
+            job_id,
+        ]
+        common_outputs = [
+            status,
+            transcript_output,
+            summary_output,
+            files_output,
+            job_id,
+        ]
         run_button.click(
             process,
-            inputs=[
-                source_type,
-                provider,
-                uploaded_file,
-                youtube_url,
-                api_key,
-                language,
-                transcription_model,
-                summary_model,
-                gemini_model,
-                reasoning_effort,
-                summary_style,
-                glossary,
-                slide_source_mode,
-                existing_slides_folder,
-                existing_slide_images,
-                delete_temp,
-            ],
-            outputs=[status, transcript_output, summary_output, files_output],
+            inputs=[*common_inputs, gr.State(ACTION_NEW)],
+            outputs=common_outputs,
+        )
+        resume_button.click(
+            process,
+            inputs=[*common_inputs, gr.State(ACTION_RESUME)],
+            outputs=common_outputs,
+        )
+        summary_only_button.click(
+            process,
+            inputs=[*common_inputs, gr.State(ACTION_SUMMARY_ONLY)],
+            outputs=common_outputs,
         )
     return demo
 
