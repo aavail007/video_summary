@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import os
+import threading
 import traceback
+import webbrowser
 
 import gradio as gr
+import uvicorn
+from fastapi import FastAPI
 
 from video_summary.config import settings
+from video_summary.live import register_live_routes
 from video_summary.pipeline import (
     SLIDE_SOURCE_AUTO,
     SLIDE_SOURCE_EXISTING,
@@ -22,6 +27,15 @@ APP_CSS = """
 .hero { padding: 1.2rem 0 .4rem; }
 .hero h1 { margin-bottom: .25rem; }
 .hint { color: var(--body-text-color-subdued); }
+.feature-nav { display: flex; flex-wrap: wrap; gap: .5rem; margin: .85rem 0 .2rem; }
+.feature-nav a {
+  padding: .55rem .8rem; border: 1px solid var(--border-color-primary);
+  color: var(--body-text-color-subdued); text-decoration: none;
+}
+.feature-nav a.active {
+  border-color: var(--primary-500); color: var(--primary-600);
+  background: color-mix(in srgb, var(--primary-500) 9%, transparent);
+}
 
 #upload-source-shell {
   border: 0 !important;
@@ -150,6 +164,10 @@ def build_app() -> gr.Blocks:
             <div class="hero">
               <h1>Video Summary</h1>
               <p class="hint">本機影音逐字稿與重點摘要工具。檔案保存在這台電腦；處理時，音訊片段與逐字稿會傳送至你選擇的 Gemini 或 OpenAI API。</p>
+              <nav class="feature-nav" aria-label="功能切換">
+                <a class="active" href="/">影音檔案／YouTube 摘要</a>
+                <a href="/live">即時收音逐字稿</a>
+              </nav>
             </div>
             """
         )
@@ -486,13 +504,24 @@ def build_app() -> gr.Blocks:
     return demo
 
 
-if __name__ == "__main__":
+def create_server_app() -> FastAPI:
+    server = FastAPI(title="Video Summary")
+    register_live_routes(server, settings)
     application = build_app()
     application.queue(default_concurrency_limit=1)
-    application.launch(
-        server_name="127.0.0.1",
-        server_port=7860,
-        inbrowser=os.getenv("VIDEO_SUMMARY_NO_BROWSER") != "1",
+    return gr.mount_gradio_app(
+        server,
+        application,
+        path="/",
         allowed_paths=[str(settings.data_dir)],
         css=APP_CSS,
     )
+
+
+if __name__ == "__main__":
+    server_app = create_server_app()
+    server_port = int(os.getenv("VIDEO_SUMMARY_PORT", "7860"))
+    server_url = f"http://127.0.0.1:{server_port}/"
+    if os.getenv("VIDEO_SUMMARY_NO_BROWSER") != "1":
+        threading.Timer(1.2, lambda: webbrowser.open(server_url)).start()
+    uvicorn.run(server_app, host="127.0.0.1", port=server_port)

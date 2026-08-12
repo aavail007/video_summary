@@ -1,4 +1,5 @@
 import app
+from fastapi.testclient import TestClient
 
 
 def _run_process(monkeypatch, source_type: str) -> dict[str, object]:
@@ -47,3 +48,15 @@ def test_youtube_source_ignores_hidden_uploaded_file(monkeypatch) -> None:
 
     assert captured["uploaded_path"] is None
     assert captured["youtube_url"] == "https://youtu.be/stale-url"
+
+
+def test_server_exposes_live_page_before_gradio_mount() -> None:
+    client = TestClient(app.create_server_app())
+
+    live_response = client.get("/live")
+    config_response = client.get("/api/live/config")
+
+    assert live_response.status_code == 200
+    assert "麥克風與螢幕音訊逐字稿" in live_response.text
+    assert config_response.status_code == 200
+    assert "gemini_model" in config_response.json()
