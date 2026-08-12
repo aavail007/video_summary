@@ -81,6 +81,7 @@ def test_transcribe_live_chunk_requires_api_key(tmp_path: Path) -> None:
 def test_live_assets_include_microphone_screen_and_markdown_controls() -> None:
     html = (live.LIVE_ASSETS_DIR / "live.html").read_text(encoding="utf-8")
     javascript = (live.LIVE_ASSETS_DIR / "live.js").read_text(encoding="utf-8")
+    theme = (live.LIVE_ASSETS_DIR / "theme.css").read_text(encoding="utf-8")
 
     assert "麥克風收音" in html
     assert "分頁／視窗／螢幕收音" in html
@@ -97,3 +98,10 @@ def test_live_assets_include_microphone_screen_and_markdown_controls() -> None:
     assert "function handleProviderChange()" in javascript
     assert "!state.configLoaded || !hasProviderKey()" in javascript
     assert 'fetch("/api/live/transcribe"' in javascript
+    assert 'href="/live-assets/theme.css"' in html
+    assert "app-topbar-inner" in html
+    assert html.count('class="app-card') == 3
+    assert "#e87f24" in theme
+    assert "#ffc81e" in theme
+    assert "#fefddf" in theme
+    assert "#73a5ca" in theme

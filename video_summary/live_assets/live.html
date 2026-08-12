@@ -4,26 +4,29 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>即時收音逐字稿｜Video Summary</title>
+    <link rel="stylesheet" href="/live-assets/theme.css" />
     <link rel="stylesheet" href="/live-assets/live.css" />
   </head>
   <body>
-    <header class="topbar">
-      <a class="brand" href="/">Video Summary</a>
-      <nav aria-label="功能切換">
-        <a href="/">影音檔案／YouTube 摘要</a>
-        <a class="active" href="/live">即時收音逐字稿</a>
-      </nav>
+    <header class="app-topbar">
+      <div class="app-topbar-inner">
+        <a class="app-brand" href="/">Video Summary</a>
+        <nav class="feature-nav" aria-label="功能切換">
+          <a href="/">影音檔案／YouTube 摘要</a>
+          <a class="active" href="/live">即時收音逐字稿</a>
+        </nav>
+      </div>
     </header>
 
-    <main>
-      <section class="intro">
-        <p class="eyebrow">本機即時轉錄</p>
+    <main class="page-shell">
+      <section class="app-intro">
+        <p class="app-eyebrow">本機即時轉錄</p>
         <h1>麥克風與螢幕音訊逐字稿</h1>
         <p>瀏覽器每約 20 秒傳送一段音訊至你選擇的 AI 服務，結果會依序顯示在此頁。</p>
       </section>
 
-      <section class="card settings-card">
-        <h2>AI 設定</h2>
+      <section class="app-card settings-card">
+        <div class="section-heading"><span class="step-badge">1</span><h2>AI 設定</h2></div>
         <div class="grid two-columns">
           <label>
             <span>AI 服務</span>
@@ -62,8 +65,8 @@
         </div>
       </section>
 
-      <section class="card controls-card">
-        <h2>開始收音</h2>
+      <section class="app-card controls-card">
+        <div class="section-heading"><span class="step-badge">2</span><h2>開始收音</h2></div>
         <div class="actions">
           <button id="mic-button" class="primary" disabled>🎙 麥克風收音</button>
           <button id="screen-button" class="primary" disabled>▣ 分頁／視窗／螢幕收音</button>
@@ -72,7 +75,7 @@
           <button id="clear-button" class="secondary">清除記錄</button>
           <button id="download-button" class="secondary">↓ 下載 Markdown</button>
         </div>
-        <p class="notice">
+        <p class="app-notice">
           開始收音前，必須先輸入目前 AI 服務的 API Key，或在 `.env` 完成設定。<br />
           「會議混合收音」會同時錄製你的麥克風與分享來源。請優先選擇瀏覽器分頁並勾選
           「分享分頁音訊」；建議戴耳機，避免喇叭聲再次進入麥克風。本功能只取音訊，
@@ -86,9 +89,9 @@
         <span id="timer">00:00:00</span>
       </section>
 
-      <section class="card transcript-card">
+      <section class="app-card transcript-card">
         <div class="transcript-heading">
-          <h2>即時逐字稿</h2>
+          <div class="section-heading"><span class="step-badge">3</span><h2>即時逐字稿</h2></div>
           <span id="chunk-status"></span>
         </div>
         <div id="transcript" class="transcript-empty">開始收音後，逐字稿會顯示在這裡。</div>

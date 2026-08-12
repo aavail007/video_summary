@@ -60,3 +60,22 @@ def test_server_exposes_live_page_before_gradio_mount() -> None:
     assert "麥克風與螢幕音訊逐字稿" in live_response.text
     assert config_response.status_code == 200
     assert "gemini_model" in config_response.json()
+
+
+def test_summary_page_uses_shared_navigation_and_three_card_flow() -> None:
+    demo = app.build_app()
+    components = demo.config["components"]
+    classes = [
+        item.get("props", {}).get("elem_classes", [])
+        for item in components
+    ]
+    html_values = [
+        item.get("props", {}).get("value", "")
+        for item in components
+        if item.get("type") == "html"
+    ]
+
+    assert sum("app-card" in item for item in classes) == 3
+    assert sum("page-shell" in item for item in classes) == 1
+    assert any("app-topbar-inner" in value for value in html_values)
+    assert any("影音檔案／YouTube 摘要" in value for value in html_values)
