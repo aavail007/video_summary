@@ -238,30 +238,42 @@ function delay(milliseconds) {
 }
 
 async function requestTranscription(chunk) {
-  const response = await fetch("/api/live/transcribe", {
-    method: "POST",
-    headers: {
-      "Content-Type": chunk.contentType || "audio/webm",
-      "X-AI-Provider": elements.provider.value,
-      "X-API-Key": encodeURIComponent(elements.apiKey.value.trim()),
-      "X-Language": elements.language.value,
-      "X-Gemini-Model": encodeURIComponent(elements.geminiModel.value.trim()),
-      "X-OpenAI-Model": encodeURIComponent(elements.openaiModel.value),
-    },
-    body: chunk.blob,
-  });
-  let result;
+  const started = Date.now();
+  const updateWaiting = () => {
+    const seconds = Math.floor((Date.now() - started) / 1000);
+    setStatus(`轉錄片段 ${formatTime(chunk.offset)}：已等待 ${seconds} 秒（第 ${chunk.attempts} 次請求）`);
+  };
+  updateWaiting();
+  const waitingTimer = setInterval(updateWaiting, 5000);
   try {
-    result = await response.json();
-  } catch (_) {
-    result = {};
+    const response = await fetch("/api/live/transcribe", {
+      method: "POST",
+      headers: {
+        "Content-Type": chunk.contentType || "audio/webm",
+        "X-AI-Provider": elements.provider.value,
+        "X-API-Key": encodeURIComponent(elements.apiKey.value.trim()),
+        "X-Language": elements.language.value,
+        "X-Gemini-Model": encodeURIComponent(elements.geminiModel.value.trim()),
+        "X-OpenAI-Model": encodeURIComponent(elements.openaiModel.value),
+      },
+      body: chunk.blob,
+    });
+    let result;
+    try {
+      result = await response.json();
+    } catch (_) {
+      result = {};
+    }
+    if (!response.ok) {
+      const error = new Error(result.detail || `轉錄失敗（HTTP ${response.status}）`);
+      error.retryAfter = Number(response.headers.get("Retry-After")) || 0;
+      error.retryable = result.retryable !== false;
+      throw error;
+    }
+    return result;
+  } finally {
+    clearInterval(waitingTimer);
   }
-  if (!response.ok) {
-    const error = new Error(result.detail || `轉錄失敗（HTTP ${response.status}）`);
-    error.retryAfter = Number(response.headers.get("Retry-After")) || 0;
-    throw error;
-  }
-  return result;
 }
 
 async function processChunk(chunk) {
@@ -290,6 +302,7 @@ async function processChunk(chunk) {
       return;
     } catch (error) {
       lastError = error;
+      if (error.retryable === false) break;
       if (chunk.attempts < MAX_AUTO_ATTEMPTS) {
         const waitMs = Math.max(error.retryAfter * 1000, chunk.attempts * 2000);
         setStatus(`片段轉錄失敗，${Math.ceil(waitMs / 1000)} 秒後自動重試`, "error");

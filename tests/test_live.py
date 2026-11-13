@@ -1,10 +1,29 @@
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from video_summary import live
 from video_summary.config import Settings
 from video_summary.models import TranscriptResult, TranscriptSegment
+from video_summary.gemini_retry import GeminiRequestError
+
+
+@pytest.mark.parametrize("status_code", [429, 503, 504])
+def test_exhausted_server_retries_stop_browser_auto_retry(tmp_path, monkeypatch, status_code):
+    settings = Settings(project_root=tmp_path, data_dir=tmp_path / "data", jobs_dir=tmp_path / "data/jobs")
+
+    def fail(*args, **kwargs):
+        raise GeminiRequestError("已停止自動重試", status_code=status_code)
+
+    monkeypatch.setattr(live, "transcribe_live_chunk", fail)
+    app = FastAPI()
+    live.register_live_routes(app, settings)
+    with TestClient(app) as client:
+        response = client.post("/api/live/transcribe", content=b"audio")
+    assert response.status_code == status_code
+    assert response.json() == {"detail": "已停止自動重試", "retryable": False}
 
 
 def test_transcribe_live_chunk_uses_gemini_and_cleans_temp_files(
@@ -100,6 +119,8 @@ def test_live_assets_include_microphone_screen_and_markdown_controls() -> None:
     assert 'fetch("/api/live/transcribe"' in javascript
     assert "indexedDB.open" in javascript
     assert "MAX_AUTO_ATTEMPTS = 3" in javascript
+    assert "error.retryable === false" in javascript
+    assert "clearInterval(waitingTimer)" in javascript
     assert "function retryChunk" in javascript
     assert 'id="recording-count"' in html
     assert 'id="waiting-count"' in html

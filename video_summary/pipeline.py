@@ -10,6 +10,7 @@ from pathlib import Path
 from .config import Settings
 from .exporters import summary_markdown, transcript_markdown, write_outputs
 from .gemini_provider import summarize_transcript_gemini, transcribe_chunks_gemini
+from .jobs import resolve_job_directory
 from .media import media_duration, split_audio
 from .models import SlideInsight, SummaryResult, TranscriptResult, TranscriptSegment
 from .slides import extract_unique_slides, import_existing_slides, is_video_file
@@ -33,7 +34,6 @@ SLIDE_SOURCE_OPTIONS = [
     SLIDE_SOURCE_EXISTING,
     SLIDE_SOURCE_AUTO,
 ]
-_JOB_ID_RE = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{8}$")
 
 
 def available_slide_source_options(
@@ -97,14 +97,10 @@ def _read_json(path: Path):
 
 
 def _resolve_job_dir(settings: Settings, job_id: str) -> Path:
-    normalized = (job_id or "").strip()
-    if not _JOB_ID_RE.fullmatch(normalized):
-        raise PipelineError("工作編號格式不正確。")
-    jobs_root = settings.jobs_dir.resolve()
-    job_dir = (settings.jobs_dir / normalized).resolve()
-    if jobs_root not in job_dir.parents or not job_dir.is_dir():
-        raise PipelineError("找不到指定的影音工作。")
-    return job_dir
+    try:
+        return resolve_job_directory(settings, job_id)
+    except ValueError as exc:
+        raise PipelineError(str(exc)) from exc
 
 
 def _load_detected_slides(path: Path):
@@ -175,6 +171,7 @@ def _transcribe_chunks_with_cache(
                     source_name=source_name,
                     initial_context=previous_context,
                     retry_callback=status_callback,
+                    request_label=f"轉錄片段 {index}/{len(chunks)}",
                 )
             else:
                 result = transcribe_chunks(
@@ -299,13 +296,29 @@ def run_pipeline(
             }
             _write_json(manifest_path, manifest)
 
+        # Store only non-secret settings so refreshing the UI can restore them.
+        manifest["options"] = {
+            "provider": provider,
+            "transcription_model": transcription_model,
+            "summary_model": summary_model,
+            "gemini_model": gemini_model,
+            "reasoning_effort": reasoning_effort,
+            "language_label": language_label,
+            "glossary": glossary,
+            "summary_style": summary_style,
+        }
+        _write_json(manifest_path, manifest)
+
         source_path = Path(manifest["source_path"]) if manifest.get("source_path") else None
         source_name = str(manifest.get("source_name") or "影音內容")
         source_ready = bool(source_path and source_path.is_file())
 
-        if not source_ready and not summary_only and not transcript_cache.is_file():
+        saved_chunks = sorted(chunks_dir.glob("chunk_*.mp3"))
+        if not source_ready and not saved_chunks and not summary_only and not transcript_cache.is_file():
             if resume_job_id and not uploaded_path and not youtube_url:
                 raise PipelineError("原始影音已被刪除，且尚未完成轉錄，無法續跑。")
+            if resume_job_id and manifest.get("source_path"):
+                raise PipelineError("此工作的原始影音與音訊分段已遺失；請建立新工作，避免混用舊轉錄快取。")
             if status_callback:
                 status_callback("準備影音來源")
             if uploaded_path:
@@ -327,9 +340,9 @@ def run_pipeline(
         else:
             if summary_only:
                 raise PipelineError("此工作尚未完成逐字稿，不能只重新摘要。")
-            if not source_path or not source_ready:
+            if not saved_chunks and (not source_path or not source_ready):
                 raise PipelineError("找不到可供轉錄的原始影音。")
-            chunks = sorted(chunks_dir.glob("chunk_*.mp3"))
+            chunks = saved_chunks
             if not chunks:
                 if status_callback:
                     status_callback("建立音訊分段")

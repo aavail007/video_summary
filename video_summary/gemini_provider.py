@@ -8,6 +8,7 @@ from google import genai
 from pydantic import BaseModel, Field
 
 from .gemini_retry import call_gemini_with_model_fallback
+from .gemini_requests import create_gemini_client, request_timeout_seconds
 from .media import media_duration
 from .models import SlideInsight, SummaryResult, TranscriptResult, TranscriptSegment
 from .summarization import SUMMARY_STYLE_INSTRUCTIONS, content_for_summary
@@ -51,10 +52,12 @@ def _interaction_json(
     inputs,
     schema: type[BaseModel],
     retry_callback=None,
+    request_label: str = "Gemini 請求",
 ) -> BaseModel:
     interaction = call_gemini_with_model_fallback(
         lambda active_model: client.interactions.create(
             model=active_model,
+            timeout=request_timeout_seconds(),
             input=inputs,
             response_format={
                 "type": "text",
@@ -64,6 +67,7 @@ def _interaction_json(
         ),
         primary_model=model,
         progress_callback=retry_callback,
+        request_label=request_label,
     )
     output_text = getattr(interaction, "output_text", "")
     if not output_text:
@@ -82,8 +86,9 @@ def transcribe_chunks_gemini(
     initial_context: str = "",
     progress_callback=None,
     retry_callback=None,
+    request_label: str | None = None,
 ) -> TranscriptResult:
-    client = genai.Client(api_key=api_key)
+    client = create_gemini_client(api_key)
     requested_language = LANGUAGE_CODES.get(language_label)
     all_segments: list[TranscriptSegment] = []
     offset = 0.0
@@ -125,6 +130,7 @@ def transcribe_chunks_gemini(
             ],
             schema=GeminiTranscriptResponse,
             retry_callback=retry_callback,
+            request_label=request_label or f"轉錄音訊 {index}/{len(chunks)}",
         )
         assert isinstance(parsed, GeminiTranscriptResponse)
         detected_language = parsed.detected_language or detected_language
@@ -178,6 +184,7 @@ def _gemini_summary_call(
         inputs=prompt,
         schema=SummaryResult,
         retry_callback=retry_callback,
+        request_label="產生分段摘要" if partial else "產生重點摘要",
     )
     assert isinstance(parsed, SummaryResult)
     return parsed
@@ -193,7 +200,7 @@ def summarize_transcript_gemini(
     max_batch_chars: int = 100_000,
     progress_callback=None,
 ) -> SummaryResult:
-    client = genai.Client(api_key=api_key)
+    client = create_gemini_client(api_key)
     content = content_for_summary(transcript, slides)
     if len(content) <= max_batch_chars:
         return _gemini_summary_call(

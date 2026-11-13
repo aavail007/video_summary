@@ -85,6 +85,7 @@ def test_gemini_transcription_offsets_chunks_and_sends_inline_audio(
     assert len(interactions.calls) == 2
     first_call = interactions.calls[0]
     assert first_call["model"] == "gemini-test"
+    assert first_call["timeout"] == gemini_provider.request_timeout_seconds()
     assert first_call["response_format"]["mime_type"] == "application/json"
     assert first_call["input"][1] == {
         "type": "audio",
@@ -125,6 +126,7 @@ def test_gemini_summary_uses_structured_output(monkeypatch) -> None:
     assert result.title == "測試摘要"
     call = interactions.calls[0]
     assert call["response_format"]["type"] == "text"
+    assert call["timeout"] == gemini_provider.request_timeout_seconds()
     assert "schema" in call["response_format"]
     assert "測試內容" in call["input"]
 

@@ -241,3 +241,54 @@ def test_summary_only_uses_cached_transcript_without_source(
     assert returned_job_id == job_id
     assert "重新摘要完成" in status
     assert files
+
+
+def test_resume_after_refresh_uses_saved_audio_and_skips_seven_completed_chunks(tmp_path, monkeypatch):
+    from video_summary import pipeline
+
+    settings = Settings(project_root=tmp_path, data_dir=tmp_path / "data", jobs_dir=tmp_path / "data" / "jobs")
+    job_id = "20261010-205946-4b960c2c"
+    job_dir = settings.jobs_dir / job_id
+    chunks_dir = job_dir / "chunks"
+    chunks_dir.mkdir(parents=True)
+    _write_json(job_dir / "job.json", {
+        "status": "failed", "source_name": "lecture", "source_path": "",
+        "slide_source_mode": SLIDE_SOURCE_NONE,
+    })
+    for index in range(11):
+        (chunks_dir / f"chunk_{index:03d}.mp3").write_bytes(b"audio")
+    for index in range(1, 8):
+        _write_json(job_dir / "cache" / "transcript_chunks" / f"chunk_{index:03d}.json", TranscriptResult(
+            source_name="lecture", model="gemini-test", language="zh",
+            segments=[TranscriptSegment(start=0, end=2, text=f"saved-{index}")],
+        ).model_dump())
+
+    calls = []
+
+    def transcribe(chunks, **kwargs):
+        calls.append(chunks[0].name)
+        return TranscriptResult(source_name="lecture", model="gemini-test", language="zh",
+                                segments=[TranscriptSegment(start=0, end=2, text="new words")])
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("續跑不應重新下載、複製或切割來源")
+
+    monkeypatch.setattr(pipeline, "transcribe_chunks_gemini", transcribe)
+    monkeypatch.setattr(pipeline, "media_duration", lambda path: 10.0)
+    monkeypatch.setattr(pipeline, "split_audio", unexpected)
+    monkeypatch.setattr(pipeline, "_copy_upload", unexpected)
+    monkeypatch.setattr(pipeline, "download_authorized_audio", unexpected)
+    monkeypatch.setattr(pipeline, "summarize_transcript_gemini",
+                        lambda *args, **kwargs: SummaryResult(title="summary", overview="done"))
+    result = run_pipeline(
+        settings=settings, provider="Gemini", uploaded_path=None, youtube_url="", api_key_input="test-secret",
+        transcription_model=None, summary_model=None, gemini_model="gemini-test", reasoning_effort="low",
+        language_label="繁體中文", glossary="", summary_style="課程筆記", slide_source_mode=SLIDE_SOURCE_NONE,
+        existing_slide_paths=[], delete_temp=False, resume_job_id=f"data\\jobs\\{job_id}",
+    )
+    assert calls == [f"chunk_{index:03d}.mp3" for index in range(7, 11)]
+    assert result[4] == job_id
+    assert "saved-1" in result[0]
+    manifest = (job_dir / "job.json").read_text(encoding="utf-8")
+    assert "test-secret" not in manifest
+    assert '"status": "completed"' in manifest

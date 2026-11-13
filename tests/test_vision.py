@@ -54,6 +54,7 @@ def test_gemini_slide_analysis_uses_inline_image_and_known_metadata(
     assert result[0].timestamp == 12.5
     assert result[0].image_file == "slides/slide.jpg"
     assert result[0].title == "架構圖"
+    assert interactions.calls[0]["timeout"] == vision.request_timeout_seconds()
     sent_image = interactions.calls[0]["input"][2]
     assert sent_image["type"] == "image"
     assert sent_image["mime_type"] == "image/jpeg"

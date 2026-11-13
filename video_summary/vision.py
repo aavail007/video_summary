@@ -9,6 +9,7 @@ from openai import OpenAI
 from pydantic import BaseModel, Field
 
 from .gemini_retry import call_gemini_with_model_fallback
+from .gemini_requests import create_gemini_client, request_timeout_seconds
 from .models import SlideInsight
 from .slides import DetectedSlide
 
@@ -92,6 +93,7 @@ def _analyze_gemini_batch(
     model: str,
     slides: list[DetectedSlide],
     progress_callback=None,
+    request_label: str = "分析投影片",
 ) -> SlideVisionBatch:
     inputs: list[dict[str, str]] = [{"type": "text", "text": VISION_PROMPT}]
     for slide in slides:
@@ -111,6 +113,7 @@ def _analyze_gemini_batch(
     interaction = call_gemini_with_model_fallback(
         lambda active_model: client.interactions.create(
             model=active_model,
+            timeout=request_timeout_seconds(),
             input=inputs,
             response_format={
                 "type": "text",
@@ -120,6 +123,7 @@ def _analyze_gemini_batch(
         ),
         primary_model=model,
         progress_callback=progress_callback,
+        request_label=request_label,
     )
     if not interaction.output_text:
         raise RuntimeError("Gemini 沒有回傳投影片分析結果。")
@@ -178,7 +182,7 @@ def analyze_slides(
         return []
 
     provider_key = provider.strip().lower()
-    gemini_client = genai.Client(api_key=api_key) if provider_key == "gemini" else None
+    gemini_client = create_gemini_client(api_key) if provider_key == "gemini" else None
     openai_client = OpenAI(api_key=api_key) if provider_key == "openai" else None
     batches = _slide_batches(slides)
     analyses: dict[int, SlideVisionItem] = {}
@@ -192,6 +196,7 @@ def analyze_slides(
                 model=gemini_model,
                 slides=batch,
                 progress_callback=progress_callback,
+                request_label=f"分析投影片 {batch_index}/{len(batches)} 批次",
             )
         elif provider_key == "openai":
             parsed = _analyze_openai_batch(

@@ -10,6 +10,7 @@ import uvicorn
 from fastapi import FastAPI
 
 from video_summary.config import settings
+from video_summary.jobs import incomplete_job_choices, read_job_info
 from video_summary.live import LIVE_ASSETS_DIR, register_live_routes
 from video_summary.pipeline import (
     SLIDE_SOURCE_AUTO,
@@ -113,6 +114,34 @@ ACTION_RESUME = "resume"
 ACTION_SUMMARY_ONLY = "summary_only"
 
 
+def refresh_incomplete_jobs():
+    return gr.update(choices=incomplete_job_choices(settings), value=None)
+
+
+def load_saved_job(reference):
+    """Inspect a saved job without starting a request or modifying its files."""
+    try:
+        info = read_job_info(settings, reference)
+    except (ValueError, OSError) as exc:
+        return (gr.update(), f"無法載入工作：{exc}", *[gr.update() for _ in range(9)])
+    if info["transcript_ready"]:
+        progress = "完整逐字稿已保存，可繼續後續分析或只重新摘要。"
+    else:
+        progress = f"已轉錄 {info['completed_chunks']}/{info['total_chunks']} 段；續跑會略過已完成片段。"
+        if not info["source_exists"] and not info["total_chunks"]:
+            progress += " 原始影音與音訊分段已遺失，無法接續轉錄。"
+    details = f"來源：{info['source_name']}\n{progress}\n確認 AI 設定與 API Key 後，按「續跑工作」。"
+    options = info["options"]
+    updates = []
+    for name in (
+        "provider", "language_label", "transcription_model", "summary_model",
+        "gemini_model", "reasoning_effort", "summary_style", "glossary",
+    ):
+        updates.append(gr.update(value=options[name]) if name in options else gr.update())
+    # Keys belong to the currently selected provider and are never restored from disk.
+    return info["job_id"], details, *updates, gr.update(value="")
+
+
 def process(
     source_type,
     provider,
@@ -134,8 +163,6 @@ def process(
     action=ACTION_NEW,
     progress=gr.Progress(),
 ):
-    status_messages: list[str] = []
-
     def normalized_text(value, default: str = "") -> str:
         text = value if isinstance(value, str) else ""
         return text.strip() or default
@@ -148,8 +175,7 @@ def process(
         return list(value)
 
     def update_status(message: str) -> None:
-        status_messages.append(message)
-        progress((len(status_messages) % 10) / 10, desc=message)
+        progress(None, desc=message)
 
     try:
         youtube_url = normalized_text(youtube_url)
@@ -163,6 +189,11 @@ def process(
         resume_job_id = normalized_text(job_id) if action != ACTION_NEW else ""
         if action != ACTION_NEW and not resume_job_id:
             raise ValueError("請先輸入要恢復的工作編號。")
+        if resume_job_id:
+            resume_job_id = read_job_info(settings, resume_job_id)["job_id"]
+            # The saved job supplies its own source after a browser refresh.
+            uploaded_file = None
+            youtube_url = ""
 
         transcript, summary, files, status, active_job_id = run_pipeline(
             settings=settings,
@@ -356,15 +387,25 @@ def build_app() -> gr.Blocks:
                     container=False,
                     elem_classes=["section-heading-host"],
                 )
+                incomplete_jobs = gr.Dropdown(
+                    choices=incomplete_job_choices(settings),
+                    label="選擇未完成工作",
+                    value=None,
+                    info="重新整理頁面後，可從 data/jobs 載入之前的工作，不需重新上傳影音。",
+                )
+                job_id = gr.Textbox(
+                    label="工作編號或工作資料夾路徑",
+                    placeholder=r"20261010-205946-4b960c2c 或 data\jobs\20261010-205946-4b960c2c",
+                    info="可貼上編號、相對路徑或完整路徑，再按「載入工作」查看已保存進度。",
+                )
+                with gr.Row():
+                    load_job_button = gr.Button("載入工作")
+                    refresh_jobs_button = gr.Button("重新整理工作清單")
+                job_details = gr.Textbox(label="已保存的工作進度", interactive=False, lines=3)
                 with gr.Row():
                     run_button = gr.Button("開始新工作", variant="primary", size="lg")
                     resume_button = gr.Button("續跑工作", size="lg")
                     summary_only_button = gr.Button("只重新摘要", size="lg")
-                job_id = gr.Textbox(
-                    label="工作編號",
-                    placeholder="開始後會自動顯示；也可貼上之前的工作編號",
-                    info="失敗續跑會略過已完成的音訊片段；只重新摘要不會再次轉錄。",
-                )
                 status = gr.Textbox(
                     label="狀態",
                     interactive=False,
@@ -594,20 +635,31 @@ def build_app() -> gr.Blocks:
             files_output,
             job_id,
         ]
+        job_load_outputs = [
+            job_id, job_details, provider, language, transcription_model, summary_model,
+            gemini_model, reasoning_effort, summary_style, glossary, api_key,
+        ]
+        incomplete_jobs.input(load_saved_job, inputs=[incomplete_jobs], outputs=job_load_outputs, queue=False)
+        load_job_button.click(load_saved_job, inputs=[job_id], outputs=job_load_outputs, queue=False)
+        refresh_jobs_button.click(refresh_incomplete_jobs, outputs=[incomplete_jobs], queue=False)
+        demo.load(refresh_incomplete_jobs, outputs=[incomplete_jobs], queue=False)
         run_button.click(
             process,
             inputs=[*common_inputs, gr.State(ACTION_NEW)],
             outputs=common_outputs,
+            concurrency_id="media_jobs",
         )
         resume_button.click(
             process,
             inputs=[*common_inputs, gr.State(ACTION_RESUME)],
             outputs=common_outputs,
+            concurrency_id="media_jobs",
         )
         summary_only_button.click(
             process,
             inputs=[*common_inputs, gr.State(ACTION_SUMMARY_ONLY)],
             outputs=common_outputs,
+            concurrency_id="media_jobs",
         )
     return demo
 

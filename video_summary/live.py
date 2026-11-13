@@ -6,11 +6,12 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import Settings
 from .gemini_provider import transcribe_chunks_gemini
+from .gemini_retry import GeminiRequestError
 from .media import split_audio
 from .transcription import transcribe_chunks
 
@@ -144,6 +145,13 @@ def register_live_routes(app, settings: Settings) -> None:
             )
         except LiveTranscriptionError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except GeminiRequestError as exc:
+            # The server already spent the configured retry budget. The browser
+            # must retain the audio for manual retry rather than multiplying it.
+            return JSONResponse(
+                status_code=exc.status_code,
+                content={"detail": str(exc), "retryable": False},
+            )
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"轉錄失敗：{exc}") from exc
 

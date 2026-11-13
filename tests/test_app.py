@@ -2,7 +2,7 @@ import app
 from fastapi.testclient import TestClient
 
 
-def _run_process(monkeypatch, source_type: str) -> dict[str, object]:
+def _run_process(monkeypatch, source_type: str, job_id="", action=app.ACTION_NEW) -> dict[str, object]:
     captured: dict[str, object] = {}
 
     def fake_run_pipeline(**kwargs):
@@ -10,6 +10,8 @@ def _run_process(monkeypatch, source_type: str) -> dict[str, object]:
         return "transcript", "summary", ["result.md"], "done", "20260812-120000-a1b2c3d4"
 
     monkeypatch.setattr(app, "run_pipeline", fake_run_pipeline)
+    if job_id:
+        monkeypatch.setattr(app, "read_job_info", lambda settings, reference: {"job_id": "20261010-205946-4b960c2c"})
     result = app.process(
         source_type,
         "Gemini",
@@ -27,6 +29,8 @@ def _run_process(monkeypatch, source_type: str) -> dict[str, object]:
         None,
         None,
         True,
+        job_id=job_id,
+        action=action,
         progress=lambda *args, **kwargs: None,
     )
 
@@ -54,6 +58,40 @@ def test_youtube_source_ignores_hidden_uploaded_file(monkeypatch) -> None:
 
     assert captured["uploaded_path"] is None
     assert captured["youtube_url"] == "https://youtu.be/stale-url"
+
+
+def test_resume_from_folder_ignores_stale_upload_and_url(monkeypatch):
+    captured = _run_process(monkeypatch, app.SOURCE_UPLOAD,
+                            job_id=r"data\jobs\20261010-205946-4b960c2c", action=app.ACTION_RESUME)
+    assert captured["resume_job_id"] == "20261010-205946-4b960c2c"
+    assert captured["uploaded_path"] is None
+    assert captured["youtube_url"] == ""
+    assert not captured["summary_only"]
+
+
+def test_loading_job_restores_settings_without_restoring_api_key(monkeypatch):
+    monkeypatch.setattr(app, "read_job_info", lambda *args: {
+        "job_id": "20261010-205946-4b960c2c", "source_name": "課程",
+        "transcript_ready": False, "completed_chunks": 7, "total_chunks": 11,
+        "source_exists": True,
+        "options": {"provider": "Gemini", "gemini_model": "gemini-test", "language_label": "繁體中文"},
+    })
+    result = app.load_saved_job(r"data\jobs\20261010-205946-4b960c2c")
+    assert result[0] == "20261010-205946-4b960c2c"
+    assert "7/11" in result[1]
+    assert result[2]["value"] == "Gemini"
+    assert result[6]["value"] == "gemini-test"
+    assert result[-1]["value"] == ""
+
+
+def test_loading_missing_job_keeps_current_selection(monkeypatch):
+    def missing(*args):
+        raise ValueError("找不到指定工作")
+    monkeypatch.setattr(app, "read_job_info", missing)
+    result = app.load_saved_job("missing")
+    assert len(result) == 11
+    assert "value" not in result[0]
+    assert "無法載入工作" in result[1]
 
 
 def test_server_exposes_live_page_before_gradio_mount() -> None:
